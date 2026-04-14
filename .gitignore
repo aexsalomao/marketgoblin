@@ -1,0 +1,47 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+.env
+.env.*
+
+# Secrets and credentials
+*.key
+*.pem
+*.p12
+*.pfx
+api_keys.py
+secrets.py
+credentials.json
+
+# Market data — downloaded data can be large and is reproducible
+data/
+
+# Claude local settings (personal preferences, not shared)
+CLAUDE.local.md
+
+# Test coverage
+.coverage
+coverage.xml
+htmlcov/
+
+# pytest cache
+.pytest_cache/
+
+# IDE
+.vscode/
+.idea/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# uv cache (not the lockfile — uv.lock should be committed)
+.uv/

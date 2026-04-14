@@ -1,0 +1,68 @@
+from unittest.mock import patch
+
+import polars as pl
+import pytest
+
+from marketgoblin import MarketGoblin
+
+
+def make_lf(symbol: str) -> pl.LazyFrame:
+    return pl.DataFrame({
+        "date":   pl.Series([20240102, 20240103], dtype=pl.Int32),
+        "open":   pl.Series([100.0, 101.0], dtype=pl.Float32),
+        "high":   pl.Series([102.0, 103.0], dtype=pl.Float32),
+        "low":    pl.Series([98.0, 99.0], dtype=pl.Float32),
+        "close":  pl.Series([101.0, 102.0], dtype=pl.Float32),
+        "volume": pl.Series([1e6, 2e6], dtype=pl.Float32),
+        "symbol": [symbol, symbol],
+    }).lazy()
+
+
+@pytest.fixture
+def vault():
+    return MarketGoblin(provider="yahoo")
+
+
+def test_fetch_many_returns_all_symbols(vault):
+    with patch.object(vault, "fetch", side_effect=lambda s, *a, **kw: make_lf(s)):
+        results = vault.fetch_many(["AAPL", "MSFT", "GOOGL"], "2024-01-01", "2024-01-31")
+
+    assert set(results.keys()) == {"AAPL", "MSFT", "GOOGL"}
+
+
+def test_fetch_many_isolates_failures(vault):
+    def side_effect(symbol, *args, **kwargs):
+        if symbol == "BAD":
+            raise ValueError("no data")
+        return make_lf(symbol)
+
+    with patch.object(vault, "fetch", side_effect=side_effect):
+        results = vault.fetch_many(["AAPL", "BAD", "MSFT"], "2024-01-01", "2024-01-31")
+
+    assert "AAPL" in results
+    assert "MSFT" in results
+    assert "BAD" not in results
+
+
+def test_fetch_many_all_fail(vault):
+    with patch.object(vault, "fetch", side_effect=ValueError("no data")):
+        results = vault.fetch_many(["BAD1", "BAD2"], "2024-01-01", "2024-01-31")
+
+    assert results == {}
+
+
+def test_fetch_many_returns_lazy_frames(vault):
+    with patch.object(vault, "fetch", side_effect=lambda s, *a, **kw: make_lf(s)):
+        results = vault.fetch_many(["AAPL"], "2024-01-01", "2024-01-31")
+
+    assert isinstance(results["AAPL"], pl.LazyFrame)
+
+
+def test_fetch_many_empty_symbols(vault):
+    results = vault.fetch_many([], "2024-01-01", "2024-01-31")
+    assert results == {}
+
+
+def test_unknown_provider_raises():
+    with pytest.raises(ValueError, match="Unknown provider"):
+        MarketGoblin(provider="bloomberg")
