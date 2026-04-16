@@ -3,6 +3,7 @@ import json
 import os
 from datetime import date, datetime
 from pathlib import Path
+from typing import Any
 
 import polars as pl
 
@@ -12,10 +13,10 @@ def build(
     provider: str,
     symbol: str,
     ym: str,
-    path: Path,
+    file_size_bytes: int,
     price_adjusted: bool = True,
     currency: str = "USD",
-) -> dict:
+) -> dict[str, Any]:
     """Build a metadata dict for a saved parquet slice.
 
     Computes summary stats (row count, date range, OHLCV min/max) and derives
@@ -59,7 +60,7 @@ def build(
         "missing_days": missing,
         "columns": chunk.columns,
         "downloaded_at": datetime.now().isoformat(timespec="seconds"),
-        "file_size_bytes": path.stat().st_size,
+        "file_size_bytes": file_size_bytes,
         "price_adjusted": price_adjusted,
         "currency": currency,
         "close_min": float(stats["close_min"]),
@@ -69,7 +70,7 @@ def build(
     }
 
 
-def write(metadata: dict, path: Path) -> None:
+def write(metadata: dict[str, Any], path: Path) -> None:
     """Atomically write metadata as JSON sidecar next to the .pq file."""
     json_path = path.with_suffix(".json")
     tmp = json_path.with_name(json_path.name + ".tmp")

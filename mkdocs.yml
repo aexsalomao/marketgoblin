@@ -1,0 +1,39 @@
+site_name: marketgoblin
+site_description: Market data platform for downloading, storing, and snapshotting financial OHLCV data
+site_url: https://aexsalomao.github.io/marketgoblin
+repo_url: https://github.com/aexsalomao/marketgoblin
+repo_name: aexsalomao/marketgoblin
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: green
+      accent: teal
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: green
+      accent: teal
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - pymdownx.inlinehilite
+  - admonition
+  - tables
+
+nav:
+  - Home: index.md
+  - API Reference: api.md
+  - Contributing: contributing.md
+  - Changelog: changelog.md

@@ -27,7 +27,7 @@ def fake_pq(tmp_path) -> object:
 
 
 def test_build_has_all_keys(fake_pq):
-    meta = build(make_chunk(), "yahoo", "AAPL", "2024-01", fake_pq)
+    meta = build(make_chunk(), "yahoo", "AAPL", "2024-01", 0)
     expected = {
         "symbol", "provider", "year_month", "row_count",
         "start_date", "end_date", "expected_trading_days",
@@ -39,7 +39,7 @@ def test_build_has_all_keys(fake_pq):
 
 
 def test_build_stats(fake_pq):
-    meta = build(make_chunk(), "yahoo", "AAPL", "2024-01", fake_pq)
+    meta = build(make_chunk(), "yahoo", "AAPL", "2024-01", 0)
     assert meta["symbol"] == "AAPL"
     assert meta["provider"] == "yahoo"
     assert meta["row_count"] == 4
@@ -50,27 +50,27 @@ def test_build_stats(fake_pq):
 
 
 def test_build_close_min_max(fake_pq):
-    meta = build(make_chunk(), "yahoo", "AAPL", "2024-01", fake_pq)
+    meta = build(make_chunk(), "yahoo", "AAPL", "2024-01", 0)
     assert meta["close_min"] == pytest.approx(186.0, rel=1e-3)
     assert meta["close_max"] == pytest.approx(189.0, rel=1e-3)
 
 
 def test_build_missing_days_includes_holidays(fake_pq):
-    meta = build(make_chunk(), "yahoo", "AAPL", "2024-01", fake_pq)
+    meta = build(make_chunk(), "yahoo", "AAPL", "2024-01", 0)
     # Jan 1 (New Year's) and Jan 15 (MLK Day) are weekdays not in chunk
     assert "2024-01-01" in meta["missing_days"]
     assert "2024-01-15" in meta["missing_days"]
 
 
 def test_build_missing_days_readable_format(fake_pq):
-    meta = build(make_chunk(), "yahoo", "AAPL", "2024-01", fake_pq)
+    meta = build(make_chunk(), "yahoo", "AAPL", "2024-01", 0)
     for d in meta["missing_days"]:
         assert len(d) == 10
         assert d[4] == "-" and d[7] == "-"
 
 
 def test_write_creates_json(tmp_path, fake_pq):
-    meta = build(make_chunk(), "yahoo", "AAPL", "2024-01", fake_pq)
+    meta = build(make_chunk(), "yahoo", "AAPL", "2024-01", 0)
     write(meta, fake_pq)
 
     json_path = fake_pq.with_suffix(".json")
@@ -79,7 +79,7 @@ def test_write_creates_json(tmp_path, fake_pq):
 
 
 def test_write_no_tmp_files_left(tmp_path, fake_pq):
-    meta = build(make_chunk(), "yahoo", "AAPL", "2024-01", fake_pq)
+    meta = build(make_chunk(), "yahoo", "AAPL", "2024-01", 0)
     write(meta, fake_pq)
     assert list(tmp_path.glob("*.tmp")) == []
 

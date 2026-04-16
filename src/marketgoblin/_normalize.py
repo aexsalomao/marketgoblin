@@ -14,5 +14,5 @@ def normalize(lf: pl.LazyFrame) -> pl.LazyFrame:
 def parse_dates(lf: pl.LazyFrame) -> pl.LazyFrame:
     """Convert int32 YYYYMMDD date back to pl.Date for in-memory use."""
     return lf.with_columns(
-        pl.col("date").cast(pl.Utf8).str.to_date("%Y%m%d")
+        pl.col("date").cast(pl.String).str.to_date("%Y%m%d")
     )

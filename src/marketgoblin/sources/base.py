@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from typing import Any
 
 import polars as pl
 
@@ -6,7 +7,7 @@ import polars as pl
 class BaseSource(ABC):
     name: str
 
-    def __init__(self, api_key: str | None = None) -> None:
+    def __init__(self, api_key: str | None = None, **kwargs: Any) -> None:
         self.api_key = api_key
 
     @abstractmethod
