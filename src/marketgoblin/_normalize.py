@@ -1,12 +1,13 @@
 import polars as pl
 
-_NUMERIC_COLS = ["open", "high", "low", "close", "volume"]
+_OHLC_COLS = ["open", "high", "low", "close"]
 
 
 def normalize(lf: pl.LazyFrame) -> pl.LazyFrame:
-    """Cast numerics to float32 and date to int32 YYYYMMDD (e.g. 20260101)."""
+    """Cast OHLC to float32, volume to float64, and date to int32 YYYYMMDD (e.g. 20260101)."""
     return lf.with_columns(
-        [pl.col(c).cast(pl.Float32) for c in _NUMERIC_COLS]
+        [pl.col(c).cast(pl.Float32) for c in _OHLC_COLS]
+        + [pl.col("volume").cast(pl.Float64)]
         + [pl.col("date").dt.strftime("%Y%m%d").cast(pl.Int32)]
     )
 

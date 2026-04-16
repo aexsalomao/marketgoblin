@@ -43,8 +43,9 @@ def test_fetch_date_filter(source: CSVSource) -> None:
 def test_fetch_schema(source: CSVSource) -> None:
     df = source.fetch("AAPL", "2024-01-01", "2024-12-31").collect()
     assert df.schema["date"] == pl.Int32
-    for col in ["open", "high", "low", "close", "volume"]:
+    for col in ["open", "high", "low", "close"]:
         assert df.schema[col] == pl.Float32
+    assert df.schema["volume"] == pl.Float64
 
 
 def test_fetch_missing_file_raises(tmp_path: Path) -> None:
