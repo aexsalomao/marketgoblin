@@ -8,15 +8,17 @@ from marketgoblin._metadata import build, write
 
 def make_chunk() -> pl.DataFrame:
     # Four trading days in Jan 2024: 2nd (Tue) through 5th (Fri)
-    return pl.DataFrame({
-        "date":   pl.Series([20240102, 20240103, 20240104, 20240105], dtype=pl.Int32),
-        "open":   pl.Series([185.0, 186.0, 187.0, 188.0], dtype=pl.Float32),
-        "high":   pl.Series([187.0, 188.0, 189.0, 190.0], dtype=pl.Float32),
-        "low":    pl.Series([183.0, 184.0, 185.0, 186.0], dtype=pl.Float32),
-        "close":  pl.Series([186.0, 187.0, 188.0, 189.0], dtype=pl.Float32),
-        "volume": pl.Series([80e6, 75e6, 70e6, 65e6], dtype=pl.Float32),
-        "symbol": ["AAPL"] * 4,
-    })
+    return pl.DataFrame(
+        {
+            "date": pl.Series([20240102, 20240103, 20240104, 20240105], dtype=pl.Int32),
+            "open": pl.Series([185.0, 186.0, 187.0, 188.0], dtype=pl.Float32),
+            "high": pl.Series([187.0, 188.0, 189.0, 190.0], dtype=pl.Float32),
+            "low": pl.Series([183.0, 184.0, 185.0, 186.0], dtype=pl.Float32),
+            "close": pl.Series([186.0, 187.0, 188.0, 189.0], dtype=pl.Float32),
+            "volume": pl.Series([80e6, 75e6, 70e6, 65e6], dtype=pl.Float32),
+            "symbol": ["AAPL"] * 4,
+        }
+    )
 
 
 @pytest.fixture
@@ -29,11 +31,23 @@ def fake_pq(tmp_path) -> object:
 def test_build_has_all_keys(fake_pq):
     meta = build(make_chunk(), "yahoo", "AAPL", "2024-01", 0)
     expected = {
-        "symbol", "provider", "year_month", "row_count",
-        "start_date", "end_date", "expected_trading_days",
-        "missing_days", "columns", "downloaded_at",
-        "file_size_bytes", "price_adjusted", "currency",
-        "close_min", "close_max", "volume_min", "volume_max",
+        "symbol",
+        "provider",
+        "year_month",
+        "row_count",
+        "start_date",
+        "end_date",
+        "expected_trading_days",
+        "missing_days",
+        "columns",
+        "downloaded_at",
+        "file_size_bytes",
+        "price_adjusted",
+        "currency",
+        "close_min",
+        "close_max",
+        "volume_min",
+        "volume_max",
     }
     assert set(meta.keys()) == expected
 

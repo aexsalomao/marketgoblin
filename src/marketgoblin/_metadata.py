@@ -23,15 +23,17 @@ def build(
     missing trading days by comparing chunk dates against all weekdays in the month.
     The returned dict is intended to be written as a JSON sidecar via write().
     """
-    stats = chunk.select([
-        pl.col("date").min().alias("start_date"),
-        pl.col("date").max().alias("end_date"),
-        pl.len().alias("row_count"),
-        pl.col("close").min().alias("close_min"),
-        pl.col("close").max().alias("close_max"),
-        pl.col("volume").min().alias("volume_min"),
-        pl.col("volume").max().alias("volume_max"),
-    ]).row(0, named=True)
+    stats = chunk.select(
+        [
+            pl.col("date").min().alias("start_date"),
+            pl.col("date").max().alias("end_date"),
+            pl.len().alias("row_count"),
+            pl.col("close").min().alias("close_min"),
+            pl.col("close").max().alias("close_max"),
+            pl.col("volume").min().alias("volume_min"),
+            pl.col("volume").max().alias("volume_max"),
+        ]
+    ).row(0, named=True)
 
     year, month = map(int, ym.split("-"))
     last_day = calendar.monthrange(year, month)[1]
@@ -43,10 +45,7 @@ def build(
     weekday_ints = all_weekdays.dt.strftime("%Y%m%d").cast(pl.Int32)
     actual_dates = chunk["date"].to_list()
     missing = (
-        all_weekdays
-        .filter(~weekday_ints.is_in(actual_dates))
-        .dt.strftime("%Y-%m-%d")
-        .to_list()
+        all_weekdays.filter(~weekday_ints.is_in(actual_dates)).dt.strftime("%Y-%m-%d").to_list()
     )
 
     return {

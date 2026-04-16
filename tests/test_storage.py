@@ -8,15 +8,17 @@ from marketgoblin.storage.disk import DiskStorage
 
 def make_lf() -> pl.LazyFrame:
     # Two rows in Jan, two in Feb
-    return pl.DataFrame({
-        "date":   pl.Series([20240102, 20240103, 20240201, 20240202], dtype=pl.Int32),
-        "open":   pl.Series([185.0, 186.0, 187.0, 188.0], dtype=pl.Float32),
-        "high":   pl.Series([187.0, 188.0, 189.0, 190.0], dtype=pl.Float32),
-        "low":    pl.Series([183.0, 184.0, 185.0, 186.0], dtype=pl.Float32),
-        "close":  pl.Series([186.0, 187.0, 188.0, 189.0], dtype=pl.Float32),
-        "volume": pl.Series([80_000_000, 75_000_000, 70_000_000, 65_000_000], dtype=pl.Int64),
-        "symbol": ["AAPL"] * 4,
-    }).lazy()
+    return pl.DataFrame(
+        {
+            "date": pl.Series([20240102, 20240103, 20240201, 20240202], dtype=pl.Int32),
+            "open": pl.Series([185.0, 186.0, 187.0, 188.0], dtype=pl.Float32),
+            "high": pl.Series([187.0, 188.0, 189.0, 190.0], dtype=pl.Float32),
+            "low": pl.Series([183.0, 184.0, 185.0, 186.0], dtype=pl.Float32),
+            "close": pl.Series([186.0, 187.0, 188.0, 189.0], dtype=pl.Float32),
+            "volume": pl.Series([80_000_000, 75_000_000, 70_000_000, 65_000_000], dtype=pl.Int64),
+            "symbol": ["AAPL"] * 4,
+        }
+    ).lazy()
 
 
 @pytest.fixture

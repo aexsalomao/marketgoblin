@@ -37,7 +37,10 @@ class YahooSource(BaseSource):
                 last_exc = exc
                 logger.warning(
                     "fetch attempt %d/%d failed | symbol=%s error=%s",
-                    attempt, _MAX_RETRIES, symbol, exc,
+                    attempt,
+                    _MAX_RETRIES,
+                    symbol,
+                    exc,
                 )
                 if attempt < _MAX_RETRIES:
                     time.sleep(_RETRY_DELAYS[attempt - 1])
@@ -60,6 +63,8 @@ class YahooSource(BaseSource):
 
         logger.error(
             "all %d fetch attempts failed | symbol=%s error=%s",
-            _MAX_RETRIES, symbol, last_exc,
+            _MAX_RETRIES,
+            symbol,
+            last_exc,
         )
         raise last_exc
