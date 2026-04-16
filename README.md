@@ -2,11 +2,12 @@
 
 > Download, store, and load financial OHLCV data — fast and without fuss.
 
+[![PyPI](https://img.shields.io/pypi/v/marketgoblin?color=green)](https://pypi.org/project/marketgoblin/)
 ![Python](https://img.shields.io/badge/python-3.13-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Status](https://img.shields.io/badge/status-alpha-orange)
 [![CI](https://github.com/aexsalomao/marketgoblin/actions/workflows/ci.yml/badge.svg)](https://github.com/aexsalomao/marketgoblin/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/aexsalomao/marketgoblin/branch/master/graph/badge.svg)](https://codecov.io/gh/aexsalomao/marketgoblin)
+[![Docs](https://img.shields.io/badge/docs-aexsalomao.github.io%2Fmarketgoblin-blue)](https://aexsalomao.github.io/marketgoblin)
 
 **marketgoblin** is a lightweight market data platform built on [Polars](https://pola.rs/) and [yfinance](https://github.com/ranaroussi/yfinance). It fetches OHLCV data, slices it into monthly Parquet files, writes JSON sidecars with metadata, and lets you load it back with a single call.
 
