@@ -32,6 +32,20 @@ theme:
     - content.code.annotate
     - content.tabs.link
 
+extra_css:
+  - stylesheets/extra.css
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/aexsalomao/marketgoblin
+      name: GitHub
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/marketgoblin/
+      name: PyPI
+
+copyright: Copyright &copy; 2026 Antônio Salomão
+
 plugins:
   - search
 
@@ -47,6 +61,8 @@ markdown_extensions:
   - pymdownx.emoji:
       emoji_index: !!python/name:material.extensions.emoji.twemoji
       emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.snippets:
+      base_path: ["."]
   - admonition
   - pymdownx.details
   - tables
