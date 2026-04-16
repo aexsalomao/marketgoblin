@@ -1,21 +1,22 @@
 from datetime import date
 
 import polars as pl
-import pytest
 
 from marketgoblin._normalize import normalize, parse_dates
 
 
 def make_raw() -> pl.LazyFrame:
-    return pl.DataFrame({
-        "date": [date(2024, 1, 2), date(2024, 1, 3)],
-        "open":   pl.Series([185.0, 186.0], dtype=pl.Float64),
-        "high":   pl.Series([187.0, 188.0], dtype=pl.Float64),
-        "low":    pl.Series([183.0, 184.0], dtype=pl.Float64),
-        "close":  pl.Series([186.0, 187.0], dtype=pl.Float64),
-        "volume": pl.Series([80_000_000.0, 75_000_000.0], dtype=pl.Float64),
-        "symbol": ["AAPL", "AAPL"],
-    }).lazy()
+    return pl.DataFrame(
+        {
+            "date": [date(2024, 1, 2), date(2024, 1, 3)],
+            "open": pl.Series([185.0, 186.0], dtype=pl.Float64),
+            "high": pl.Series([187.0, 188.0], dtype=pl.Float64),
+            "low": pl.Series([183.0, 184.0], dtype=pl.Float64),
+            "close": pl.Series([186.0, 187.0], dtype=pl.Float64),
+            "volume": pl.Series([80_000_000.0, 75_000_000.0], dtype=pl.Float64),
+            "symbol": ["AAPL", "AAPL"],
+        }
+    ).lazy()
 
 
 def test_normalize_numeric_dtypes():

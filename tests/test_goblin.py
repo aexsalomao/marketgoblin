@@ -7,15 +7,17 @@ from marketgoblin import MarketGoblin
 
 
 def make_lf(symbol: str) -> pl.LazyFrame:
-    return pl.DataFrame({
-        "date":   pl.Series([20240102, 20240103], dtype=pl.Int32),
-        "open":   pl.Series([100.0, 101.0], dtype=pl.Float32),
-        "high":   pl.Series([102.0, 103.0], dtype=pl.Float32),
-        "low":    pl.Series([98.0, 99.0], dtype=pl.Float32),
-        "close":  pl.Series([101.0, 102.0], dtype=pl.Float32),
-        "volume": pl.Series([1e6, 2e6], dtype=pl.Float32),
-        "symbol": [symbol, symbol],
-    }).lazy()
+    return pl.DataFrame(
+        {
+            "date": pl.Series([20240102, 20240103], dtype=pl.Int32),
+            "open": pl.Series([100.0, 101.0], dtype=pl.Float32),
+            "high": pl.Series([102.0, 103.0], dtype=pl.Float32),
+            "low": pl.Series([98.0, 99.0], dtype=pl.Float32),
+            "close": pl.Series([101.0, 102.0], dtype=pl.Float32),
+            "volume": pl.Series([1e6, 2e6], dtype=pl.Float32),
+            "symbol": [symbol, symbol],
+        }
+    ).lazy()
 
 
 @pytest.fixture

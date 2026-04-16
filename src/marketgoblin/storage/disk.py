@@ -4,7 +4,8 @@ from pathlib import Path
 
 import polars as pl
 
-from marketgoblin._metadata import build as _build_metadata, write as _write_metadata
+from marketgoblin._metadata import build as _build_metadata
+from marketgoblin._metadata import write as _write_metadata
 from marketgoblin._normalize import parse_dates as _parse_dates
 
 logger = logging.getLogger(__name__)
@@ -24,8 +25,11 @@ class DiskStorage:
     def save(self, provider: str, symbol: str, lf: pl.LazyFrame, adjusted: bool = True) -> None:
         """Split by month and atomically write one .pq file per month."""
         df = lf.collect().with_columns(
-            (pl.col("date").cast(pl.String).str.slice(0, 4) + "-" +
-             pl.col("date").cast(pl.String).str.slice(4, 2)).alias("_ym")
+            (
+                pl.col("date").cast(pl.String).str.slice(0, 4)
+                + "-"
+                + pl.col("date").cast(pl.String).str.slice(4, 2)
+            ).alias("_ym")
         )
 
         for ym in df["_ym"].unique().sort():
@@ -33,11 +37,24 @@ class DiskStorage:
             path = self._slice_path(provider, symbol, ym, adjusted)
             path.parent.mkdir(parents=True, exist_ok=True)
             self._atomic_write(chunk, path)
-            meta = _build_metadata(chunk, provider, symbol, ym, path.stat().st_size, price_adjusted=adjusted)
+            meta = _build_metadata(
+                chunk, provider, symbol, ym, path.stat().st_size, price_adjusted=adjusted
+            )
             _write_metadata(meta, path)
-            logger.info("slice saved | %s rows=%d size=%db", path.name, meta["row_count"], meta["file_size_bytes"])
+            logger.info(
+                "slice saved | %s rows=%d size=%db",
+                path.name,
+                meta["row_count"],
+                meta["file_size_bytes"],
+            )
             if meta["missing_days"]:
-                logger.warning("missing days | symbol=%s month=%s count=%d days=%s", symbol, ym, len(meta["missing_days"]), meta["missing_days"])
+                logger.warning(
+                    "missing days | symbol=%s month=%s count=%d days=%s",
+                    symbol,
+                    ym,
+                    len(meta["missing_days"]),
+                    meta["missing_days"],
+                )
 
     def load(
         self,
@@ -56,10 +73,7 @@ class DiskStorage:
         start_int = int(start.replace("-", ""))
         end_int = int(end.replace("-", ""))
 
-        lf = (
-            pl.scan_parquet(pattern)
-            .filter(pl.col("date").is_between(start_int, end_int))
-        )
+        lf = pl.scan_parquet(pattern).filter(pl.col("date").is_between(start_int, end_int))
 
         return _parse_dates(lf) if parse_dates else lf
 

@@ -47,9 +47,7 @@ def _validate_dates(start: str, end: str) -> None:
         s = datetime.strptime(start, _DATE_FMT)
         e = datetime.strptime(end, _DATE_FMT)
     except ValueError:
-        raise ValueError(
-            f"Dates must be 'YYYY-MM-DD'. Got start={start!r}, end={end!r}"
-        )
+        raise ValueError(f"Dates must be 'YYYY-MM-DD'. Got start={start!r}, end={end!r}")
     if s >= e:
         raise ValueError(f"start must be before end. Got {start} >= {end}")
 
@@ -144,7 +142,11 @@ class MarketGoblin:
         price_type = "adjusted" if adjusted else "raw"
         logger.info(
             "fetch started | symbol=%s provider=%s range=%s:%s %s",
-            symbol, self._provider, start, end, price_type,
+            symbol,
+            self._provider,
+            start,
+            end,
+            price_type,
         )
         t0 = time.perf_counter()
 
@@ -179,7 +181,9 @@ class MarketGoblin:
 
             if self._storage:
                 self._storage.save(self._provider, symbol, lf, adjusted=adjusted)
-                lf = self._storage.load(self._provider, symbol, start, end, parse_dates, adjusted=adjusted)
+                lf = self._storage.load(
+                    self._provider, symbol, start, end, parse_dates, adjusted=adjusted
+                )
                 elapsed = time.perf_counter() - t0
                 logger.info("fetch complete | symbol=%s saved=True elapsed=%.2fs", symbol, elapsed)
             else:
@@ -187,7 +191,9 @@ class MarketGoblin:
                 elapsed = time.perf_counter() - t0
                 logger.info(
                     "fetch complete | symbol=%s rows=%d saved=False elapsed=%.2fs",
-                    symbol, df.height, elapsed,
+                    symbol,
+                    df.height,
+                    elapsed,
                 )
                 lf = _parse_dates(df.lazy()) if parse_dates else df.lazy()
 
@@ -231,7 +237,9 @@ class MarketGoblin:
         if not self._storage:
             raise RuntimeError("load() requires save_path to be set.")
 
-        return self._storage.load(self._provider, symbol, start, end, parse_dates, adjusted=adjusted)
+        return self._storage.load(
+            self._provider, symbol, start, end, parse_dates, adjusted=adjusted
+        )
 
     def fetch_many(
         self,
@@ -273,10 +281,7 @@ class MarketGoblin:
             return self.fetch(symbol, start, end, adjusted, parse_dates)
 
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            futures = {
-                pool.submit(_rate_limited_fetch, symbol): symbol
-                for symbol in symbols
-            }
+            futures = {pool.submit(_rate_limited_fetch, symbol): symbol for symbol in symbols}
             for future in as_completed(futures):
                 symbol = futures[future]
                 try:
@@ -287,6 +292,8 @@ class MarketGoblin:
         elapsed = time.perf_counter() - t0
         logger.info(
             "fetch_many complete | success=%d failed=%d elapsed=%.2fs",
-            len(results), len(symbols) - len(results), elapsed,
+            len(results),
+            len(symbols) - len(results),
+            elapsed,
         )
         return results
