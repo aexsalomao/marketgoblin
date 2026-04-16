@@ -45,3 +45,6 @@ Thumbs.db
 
 # uv cache (not the lockfile — uv.lock should be committed)
 .uv/
+
+# MkDocs local build output (deployed via GitHub Actions, not committed)
+site/
