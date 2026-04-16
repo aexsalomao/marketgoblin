@@ -45,7 +45,7 @@ def test_fetch_schema(source: CSVSource) -> None:
     assert df.schema["date"] == pl.Int32
     for col in ["open", "high", "low", "close"]:
         assert df.schema[col] == pl.Float32
-    assert df.schema["volume"] == pl.Float64
+    assert df.schema["volume"] == pl.Int64
 
 
 def test_fetch_missing_file_raises(tmp_path: Path) -> None:

@@ -95,7 +95,8 @@ MarketGoblin(provider: str, api_key: str | None = None, save_path: str | Path | 
 | Property | Detail |
 |---|---|
 | Date column | `int32` YYYYMMDD (e.g. `20240101`); `parse_dates=True` → `pl.Date` |
-| OHLCV columns | `float32` |
+| OHLC columns | `float32` |
+| Volume column | `int64` |
 | Parquet path | `{save_path}/{provider}/ohlcv/{adjusted\|raw}/{SYMBOL}/{SYMBOL}_{YYYY-MM}.pq` |
 | JSON sidecar | Same path, `.json` extension — row count, date range, OHLCV stats, missing trading days |
 

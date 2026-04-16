@@ -14,7 +14,7 @@ def make_lf() -> pl.LazyFrame:
         "high":   pl.Series([187.0, 188.0, 189.0, 190.0], dtype=pl.Float32),
         "low":    pl.Series([183.0, 184.0, 185.0, 186.0], dtype=pl.Float32),
         "close":  pl.Series([186.0, 187.0, 188.0, 189.0], dtype=pl.Float32),
-        "volume": pl.Series([80e6, 75e6, 70e6, 65e6], dtype=pl.Float64),
+        "volume": pl.Series([80_000_000, 75_000_000, 70_000_000, 65_000_000], dtype=pl.Int64),
         "symbol": ["AAPL"] * 4,
     }).lazy()
 
@@ -64,7 +64,7 @@ def test_load_schema(storage):
     assert df.schema["date"] == pl.Int32
     for col in ["open", "high", "low", "close"]:
         assert df.schema[col] == pl.Float32
-    assert df.schema["volume"] == pl.Float64
+    assert df.schema["volume"] == pl.Int64
 
 
 def test_load_parse_dates(storage):

@@ -22,7 +22,7 @@ def test_normalize_numeric_dtypes():
     df = normalize(make_raw()).collect()
     for col in ["open", "high", "low", "close"]:
         assert df.schema[col] == pl.Float32, f"{col} should be Float32"
-    assert df.schema["volume"] == pl.Float64
+    assert df.schema["volume"] == pl.Int64
 
 
 def test_normalize_date_is_int32():

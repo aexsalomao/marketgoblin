@@ -63,7 +63,7 @@ class MarketGoblin:
 ```python
 _NUMERIC_COLS = ["open", "high", "low", "close", "volume"]
 
-def normalize(lf: pl.LazyFrame) -> pl.LazyFrame   # → float32 OHLCV, int32 YYYYMMDD date
+def normalize(lf: pl.LazyFrame) -> pl.LazyFrame   # → float32 OHLC, int64 volume, int32 YYYYMMDD date
 def parse_dates(lf: pl.LazyFrame) -> pl.LazyFrame  # → int32 YYYYMMDD → pl.Date
 ```
 
@@ -117,7 +117,7 @@ class DiskStorage:
 ## Data Conventions
 
 - **Date on disk:** `int32` YYYYMMDD (e.g. `20240101`); use `parse_dates=True` to get `pl.Date`
-- **OHLCV:** `float32`
+- **OHLC:** `float32` | **Volume:** `int64`
 - **Parquet path:** `{base_path}/{provider}/ohlcv/{adjusted|raw}/{SYMBOL}/{SYMBOL}_{YYYY-MM}.pq`
 - **JSON sidecar:** same path, `.json` extension — written atomically after each `.pq`
 - **Atomic writes:** `.tmp` rename for both `.pq` and `.json`
