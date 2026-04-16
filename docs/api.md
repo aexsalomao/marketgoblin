@@ -91,7 +91,7 @@ class MySource(BaseSource):
         ...
 ```
 
-Register in `vault.py`:
+Register in `goblin.py`:
 
 ```python
 _SOURCES = {"yahoo": YahooSource, "csv": CSVSource, "mysource": MySource}

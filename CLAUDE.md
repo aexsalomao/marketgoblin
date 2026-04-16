@@ -32,7 +32,7 @@ pytest --cov=marketgoblin  # with coverage
 ```
 src/marketgoblin/
     __init__.py           # exports MarketGoblin; __version__ = "0.1.0"
-    vault.py              # MarketGoblin — public API facade
+    goblin.py              # MarketGoblin — public API facade
     _normalize.py         # normalize() + parse_dates() — pure, no local imports
     _metadata.py          # build() + write() — pure, no local imports
     sources/
@@ -45,7 +45,7 @@ tests/
     test_metadata.py
     test_normalize.py
     test_storage.py
-    test_vault.py
+    test_goblin.py
     test_csv_source.py
 docs/                     # MkDocs source (index.md, api.md, contributing.md, changelog.md)
 example.py
@@ -54,7 +54,7 @@ mkdocs.yml
 
 ## Module APIs
 
-### `vault.py` — `MarketGoblin`
+### `goblin.py` — `MarketGoblin`
 
 ```python
 _SOURCES: dict[str, type[BaseSource]] = {"yahoo": YahooSource, "csv": CSVSource}
@@ -87,7 +87,7 @@ def normalize(lf: pl.LazyFrame) -> pl.LazyFrame   # → float32 OHLC, int64 volu
 def parse_dates(lf: pl.LazyFrame) -> pl.LazyFrame  # → int32 YYYYMMDD → pl.Date
 ```
 
-Called by `YahooSource.fetch()` and `CSVSource.fetch()` (normalize), and `DiskStorage.load()` / `vault.py` (parse_dates).
+Called by `YahooSource.fetch()` and `CSVSource.fetch()` (normalize), and `DiskStorage.load()` / `goblin.py` (parse_dates).
 
 ### `_metadata.py`
 
@@ -158,7 +158,7 @@ class DiskStorage:
 ## Import Graph
 
 ```
-vault.py
+goblin.py
   ├── _normalize.parse_dates
   ├── sources.yahoo.YahooSource  ──→  _normalize.normalize
   │                              ──→  sources.base.BaseSource

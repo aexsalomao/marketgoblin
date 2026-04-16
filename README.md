@@ -115,7 +115,7 @@ class MySource(BaseSource):
         ...  # return a normalized LazyFrame
 ```
 
-Then register it in `vault.py`:
+Then register it in `goblin.py`:
 
 ```python
 _SOURCES = {"yahoo": YahooSource, "csv": CSVSource, "mysource": MySource}

@@ -19,47 +19,47 @@ def make_lf(symbol: str) -> pl.LazyFrame:
 
 
 @pytest.fixture
-def vault():
+def goblin():
     return MarketGoblin(provider="yahoo")
 
 
-def test_fetch_many_returns_all_symbols(vault):
-    with patch.object(vault, "fetch", side_effect=lambda s, *a, **kw: make_lf(s)):
-        results = vault.fetch_many(["AAPL", "MSFT", "GOOGL"], "2024-01-01", "2024-01-31")
+def test_fetch_many_returns_all_symbols(goblin):
+    with patch.object(goblin, "fetch", side_effect=lambda s, *a, **kw: make_lf(s)):
+        results = goblin.fetch_many(["AAPL", "MSFT", "GOOGL"], "2024-01-01", "2024-01-31")
 
     assert set(results.keys()) == {"AAPL", "MSFT", "GOOGL"}
 
 
-def test_fetch_many_isolates_failures(vault):
+def test_fetch_many_isolates_failures(goblin):
     def side_effect(symbol, *args, **kwargs):
         if symbol == "BAD":
             raise ValueError("no data")
         return make_lf(symbol)
 
-    with patch.object(vault, "fetch", side_effect=side_effect):
-        results = vault.fetch_many(["AAPL", "BAD", "MSFT"], "2024-01-01", "2024-01-31")
+    with patch.object(goblin, "fetch", side_effect=side_effect):
+        results = goblin.fetch_many(["AAPL", "BAD", "MSFT"], "2024-01-01", "2024-01-31")
 
     assert "AAPL" in results
     assert "MSFT" in results
     assert "BAD" not in results
 
 
-def test_fetch_many_all_fail(vault):
-    with patch.object(vault, "fetch", side_effect=ValueError("no data")):
-        results = vault.fetch_many(["BAD1", "BAD2"], "2024-01-01", "2024-01-31")
+def test_fetch_many_all_fail(goblin):
+    with patch.object(goblin, "fetch", side_effect=ValueError("no data")):
+        results = goblin.fetch_many(["BAD1", "BAD2"], "2024-01-01", "2024-01-31")
 
     assert results == {}
 
 
-def test_fetch_many_returns_lazy_frames(vault):
-    with patch.object(vault, "fetch", side_effect=lambda s, *a, **kw: make_lf(s)):
-        results = vault.fetch_many(["AAPL"], "2024-01-01", "2024-01-31")
+def test_fetch_many_returns_lazy_frames(goblin):
+    with patch.object(goblin, "fetch", side_effect=lambda s, *a, **kw: make_lf(s)):
+        results = goblin.fetch_many(["AAPL"], "2024-01-01", "2024-01-31")
 
     assert isinstance(results["AAPL"], pl.LazyFrame)
 
 
-def test_fetch_many_empty_symbols(vault):
-    results = vault.fetch_many([], "2024-01-01", "2024-01-31")
+def test_fetch_many_empty_symbols(goblin):
+    results = goblin.fetch_many([], "2024-01-01", "2024-01-31")
     assert results == {}
 
 

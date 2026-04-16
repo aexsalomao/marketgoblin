@@ -30,7 +30,7 @@ CI runs the same checks automatically on every PR.
 
 ## Adding a Data Source
 
-Subclass `BaseSource`, implement `fetch()`, and register in `vault.py`:
+Subclass `BaseSource`, implement `fetch()`, and register in `goblin.py`:
 
 ```python
 # src/marketgoblin/sources/mysource.py
@@ -45,7 +45,7 @@ class MySource(BaseSource):
 ```
 
 ```python
-# src/marketgoblin/vault.py
+# src/marketgoblin/goblin.py
 _SOURCES = {"yahoo": YahooSource, "csv": CSVSource, "mysource": MySource}
 ```
 
