@@ -173,12 +173,7 @@ _metadata.py    (no local imports)
 
 ## Code Style
 
-- **Simple first:** simplest correct implementation before optimizing
-- **Polars over pandas** everywhere; **parquet over CSV/JSON** for persistence
-- **Pure functions** preferred; inject dependencies for testability
-- **Docstrings** on public APIs where behavior isn't obvious from the signature
-- **Ruff** enforces PEP 8 + isort + pyupgrade; **mypy** strict mode on `src/`
-- Apply design patterns only where they genuinely reduce complexity
+See `code-style.md` and `testing.md` in this directory for general Python conventions.
 
 ## Git Branches
 
