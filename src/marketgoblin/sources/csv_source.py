@@ -1,3 +1,7 @@
+# CSVSource — OHLCV provider backed by local CSV files.
+# Reads {data_dir}/{SYMBOL}.csv, filters by date range, and returns a
+# normalized LazyFrame. Useful for backtesting and offline use.
+
 from pathlib import Path
 from typing import Any
 

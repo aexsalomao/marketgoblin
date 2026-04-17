@@ -1,3 +1,7 @@
+# Pure helpers for OHLCV dtype normalization.
+# normalize() casts incoming frames to the on-disk schema; parse_dates() converts
+# the stored int32 YYYYMMDD date column back to pl.Date for in-memory use.
+
 import polars as pl
 
 _OHLC_COLS = ["open", "high", "low", "close"]

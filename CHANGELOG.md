@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-04-17
+
+### Removed
+- Undocumented `report=True` option on `MarketGoblin` and the `download_report.csv` sidecar — not part of the public API surface defined in `.claude/rules/project.md`
+
+### Changed
+- File header comments on every module per `code-style.md` rule 10
+- Flattened `for` loops in tests to comply with `testing.md` rule 32 (no logic in tests)
+- Fixed volume dtype in test fixtures (`Float32` → `Int64`) and `file_size_bytes` arg type in `test_metadata.py`
+
 ## [0.1.1] - 2026-04-16
 
 ### Added

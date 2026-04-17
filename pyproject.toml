@@ -1,6 +1,6 @@
 [project]
 name = "marketgoblin"
-version = "0.1.1"
+version = "0.1.2"
 description = "Market data platform for downloading and storing financial OHLCV data"
 readme = "README.md"
 license = "MIT"

@@ -1,3 +1,7 @@
+# DiskStorage — persists OHLCV data as monthly parquet slices with JSON sidecars.
+# All writes are atomic (.tmp rename); loads return a LazyFrame filtered to the
+# requested date range.
+
 import logging
 import os
 from pathlib import Path

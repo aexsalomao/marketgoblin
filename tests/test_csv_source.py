@@ -42,8 +42,10 @@ def test_fetch_date_filter(source: CSVSource) -> None:
 def test_fetch_schema(source: CSVSource) -> None:
     df = source.fetch("AAPL", "2024-01-01", "2024-12-31").collect()
     assert df.schema["date"] == pl.Int32
-    for col in ["open", "high", "low", "close"]:
-        assert df.schema[col] == pl.Float32
+    assert df.schema["open"] == pl.Float32
+    assert df.schema["high"] == pl.Float32
+    assert df.schema["low"] == pl.Float32
+    assert df.schema["close"] == pl.Float32
     assert df.schema["volume"] == pl.Int64
 
 
@@ -59,7 +61,6 @@ def test_fetch_symbol_uppercased(source: CSVSource) -> None:
 
 
 def test_fetch_via_market_goblin(tmp_path: Path) -> None:
-    """Integration: CSVSource wired through MarketGoblin."""
     from marketgoblin import MarketGoblin
 
     csv_dir = tmp_path / "csvs"

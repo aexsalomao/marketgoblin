@@ -64,8 +64,10 @@ def test_load_schema(storage):
     storage.save("yahoo", "AAPL", make_lf())
     df = storage.load("yahoo", "AAPL", "2024-01-01", "2024-12-31").collect()
     assert df.schema["date"] == pl.Int32
-    for col in ["open", "high", "low", "close"]:
-        assert df.schema[col] == pl.Float32
+    assert df.schema["open"] == pl.Float32
+    assert df.schema["high"] == pl.Float32
+    assert df.schema["low"] == pl.Float32
+    assert df.schema["close"] == pl.Float32
     assert df.schema["volume"] == pl.Int64
 
 

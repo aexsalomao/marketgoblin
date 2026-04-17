@@ -15,7 +15,7 @@ def make_chunk() -> pl.DataFrame:
             "high": pl.Series([187.0, 188.0, 189.0, 190.0], dtype=pl.Float32),
             "low": pl.Series([183.0, 184.0, 185.0, 186.0], dtype=pl.Float32),
             "close": pl.Series([186.0, 187.0, 188.0, 189.0], dtype=pl.Float32),
-            "volume": pl.Series([80e6, 75e6, 70e6, 65e6], dtype=pl.Float32),
+            "volume": pl.Series([80_000_000, 75_000_000, 70_000_000, 65_000_000], dtype=pl.Int64),
             "symbol": ["AAPL"] * 4,
         }
     )
@@ -78,9 +78,7 @@ def test_build_missing_days_includes_holidays(fake_pq):
 
 def test_build_missing_days_readable_format(fake_pq):
     meta = build(make_chunk(), "yahoo", "AAPL", "2024-01", 0)
-    for d in meta["missing_days"]:
-        assert len(d) == 10
-        assert d[4] == "-" and d[7] == "-"
+    assert all(len(d) == 10 and d[4] == "-" and d[7] == "-" for d in meta["missing_days"])
 
 
 def test_write_creates_json(tmp_path, fake_pq):
@@ -99,10 +97,10 @@ def test_write_no_tmp_files_left(tmp_path, fake_pq):
 
 
 def test_build_price_adjusted_true(fake_pq):
-    meta = build(make_chunk(), "yahoo", "AAPL", "2024-01", fake_pq, price_adjusted=True)
+    meta = build(make_chunk(), "yahoo", "AAPL", "2024-01", 0, price_adjusted=True)
     assert meta["price_adjusted"] is True
 
 
 def test_build_price_adjusted_false(fake_pq):
-    meta = build(make_chunk(), "yahoo", "AAPL", "2024-01", fake_pq, price_adjusted=False)
+    meta = build(make_chunk(), "yahoo", "AAPL", "2024-01", 0, price_adjusted=False)
     assert meta["price_adjusted"] is False

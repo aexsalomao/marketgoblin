@@ -1,3 +1,7 @@
+# YahooSource — OHLCV provider backed by yfinance.
+# Fetches history, retries transient failures with exponential backoff,
+# and returns a normalized LazyFrame.
+
 import logging
 import time
 from typing import Any

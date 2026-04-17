@@ -1,3 +1,7 @@
+# Metadata sidecar helpers.
+# build() computes per-slice summary stats (row count, date range, missing
+# trading days); write() atomically persists the dict as a JSON sidecar.
+
 import calendar
 import json
 import os

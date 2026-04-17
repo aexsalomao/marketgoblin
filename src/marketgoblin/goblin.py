@@ -1,4 +1,7 @@
-import csv
+# MarketGoblin — public API facade.
+# Wraps a data source (Yahoo, CSV, ...) and optional DiskStorage, exposing
+# fetch / load / fetch_many with validation, rate limiting, and logging.
+
 import logging
 import threading
 import time
@@ -24,22 +27,6 @@ _SOURCES: dict[str, type[BaseSource]] = {
 
 _DATE_FMT = "%Y-%m-%d"
 
-_REPORT_FIELDNAMES = [
-    "timestamp",
-    "symbol",
-    "provider",
-    "adjusted",
-    "requested_start",
-    "requested_end",
-    "actual_start",
-    "actual_end",
-    "rows_fetched",
-    "duration_ms",
-    "status",
-    "error_type",
-    "error_message",
-]
-
 
 def _validate_dates(start: str, end: str) -> None:
     """Raise ValueError for bad format or start >= end."""
@@ -50,11 +37,6 @@ def _validate_dates(start: str, end: str) -> None:
         raise ValueError(f"Dates must be 'YYYY-MM-DD'. Got start={start!r}, end={end!r}")
     if s >= e:
         raise ValueError(f"start must be before end. Got {start} >= {end}")
-
-
-def _yyyymmdd_to_str(d: int) -> str:
-    """Convert int32 YYYYMMDD to 'YYYY-MM-DD' string."""
-    return f"{d // 10000}-{(d % 10000) // 100:02d}-{d % 100:02d}"
 
 
 class _RateLimiter:
@@ -80,10 +62,6 @@ class MarketGoblin:
     Wraps a data source (e.g. Yahoo Finance) and optional disk storage.
     When save_path is provided, fetch() persists data as monthly parquet slices
     and subsequent load() calls read directly from disk without re-downloading.
-
-    When report=True, every fetch() call appends a row to
-    {save_path}/download_report.csv with per-download diagnostics suitable
-    for Grafana ingestion (timestamp, symbol, rows fetched, duration, errors).
     """
 
     def __init__(
@@ -91,32 +69,14 @@ class MarketGoblin:
         provider: str,
         api_key: str | None = None,
         save_path: str | Path | None = None,
-        report: bool = False,
         **source_kwargs: Any,
     ) -> None:
         if provider not in _SOURCES:
             raise ValueError(f"Unknown provider '{provider}'. Available: {list(_SOURCES)}")
-        if report and not save_path:
-            raise ValueError("report=True requires save_path to be set.")
 
         self._provider = provider
         self._source = _SOURCES[provider](api_key=api_key, **source_kwargs)
         self._storage = DiskStorage(save_path) if save_path else None
-        self._report = report
-        self._report_path: Path | None = (
-            Path(save_path) / "download_report.csv" if (report and save_path) else None
-        )
-        self._report_lock = threading.Lock()
-
-    def _append_report(self, record: dict[str, Any]) -> None:
-        assert self._report_path is not None
-        with self._report_lock:
-            write_header = not self._report_path.exists()
-            with self._report_path.open("a", newline="", encoding="utf-8") as f:
-                writer = csv.DictWriter(f, fieldnames=_REPORT_FIELDNAMES)
-                if write_header:
-                    writer.writeheader()
-                writer.writerow(record)
 
     def fetch(
         self,
@@ -150,67 +110,26 @@ class MarketGoblin:
         )
         t0 = time.perf_counter()
 
-        record: dict[str, Any] = {
-            "timestamp": datetime.now().isoformat(timespec="seconds"),
-            "symbol": symbol,
-            "provider": self._provider,
-            "adjusted": adjusted,
-            "requested_start": start,
-            "requested_end": end,
-            "actual_start": None,
-            "actual_end": None,
-            "rows_fetched": None,
-            "duration_ms": None,
-            "status": "error",
-            "error_type": None,
-            "error_message": None,
-        }
+        lf = self._source.fetch(symbol, start, end, adjusted=adjusted)
 
-        try:
-            lf = self._source.fetch(symbol, start, end, adjusted=adjusted)
-
-            if self._report:
-                summary = lf.select(
-                    pl.col("date").min().alias("d_min"),
-                    pl.col("date").max().alias("d_max"),
-                    pl.len().alias("n"),
-                ).collect()
-                record["actual_start"] = _yyyymmdd_to_str(int(summary["d_min"][0]))
-                record["actual_end"] = _yyyymmdd_to_str(int(summary["d_max"][0]))
-                record["rows_fetched"] = int(summary["n"][0])
-
-            if self._storage:
-                self._storage.save(self._provider, symbol, lf, adjusted=adjusted)
-                lf = self._storage.load(
-                    self._provider, symbol, start, end, parse_dates, adjusted=adjusted
-                )
-                elapsed = time.perf_counter() - t0
-                logger.info("fetch complete | symbol=%s saved=True elapsed=%.2fs", symbol, elapsed)
-            else:
-                df = lf.collect()
-                elapsed = time.perf_counter() - t0
-                logger.info(
-                    "fetch complete | symbol=%s rows=%d saved=False elapsed=%.2fs",
-                    symbol,
-                    df.height,
-                    elapsed,
-                )
-                lf = _parse_dates(df.lazy()) if parse_dates else df.lazy()
-
-            record["duration_ms"] = round(elapsed * 1000)
-            record["status"] = "success"
+        if self._storage:
+            self._storage.save(self._provider, symbol, lf, adjusted=adjusted)
+            lf = self._storage.load(
+                self._provider, symbol, start, end, parse_dates, adjusted=adjusted
+            )
+            elapsed = time.perf_counter() - t0
+            logger.info("fetch complete | symbol=%s saved=True elapsed=%.2fs", symbol, elapsed)
             return lf
 
-        except Exception as e:
-            elapsed = time.perf_counter() - t0
-            record["duration_ms"] = round(elapsed * 1000)
-            record["error_type"] = type(e).__name__
-            record["error_message"] = str(e)
-            raise
-
-        finally:
-            if self._report:
-                self._append_report(record)
+        df = lf.collect()
+        elapsed = time.perf_counter() - t0
+        logger.info(
+            "fetch complete | symbol=%s rows=%d saved=False elapsed=%.2fs",
+            symbol,
+            df.height,
+            elapsed,
+        )
+        return _parse_dates(df.lazy()) if parse_dates else df.lazy()
 
     def load(
         self,
@@ -254,8 +173,7 @@ class MarketGoblin:
         """Download OHLCV data for multiple symbols concurrently.
 
         Failed symbols are logged and excluded from the result — they never
-        crash the batch. When report=True, each symbol (success or failure)
-        gets its own row in the report CSV.
+        crash the batch.
 
         Args:
             symbols: List of ticker symbols e.g. ['AAPL', 'MSFT'].
