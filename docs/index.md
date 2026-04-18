@@ -8,7 +8,7 @@ hide:
 
 # marketgoblin
 
-**Download, store, and load financial OHLCV data — fast, without fuss.**
+**Download, store, and load financial market data — fast, without fuss.**
 
 [![PyPI](https://img.shields.io/pypi/v/marketgoblin?color=green)](https://pypi.org/project/marketgoblin/)
 [![Python](https://img.shields.io/pypi/pyversions/marketgoblin)](https://pypi.org/project/marketgoblin/)
@@ -27,11 +27,11 @@ pip install marketgoblin
 
 <div class="grid cards" markdown>
 
--   :material-download-circle:{ .lg .middle } **Fetch & persist**
+-   :material-download-circle:{ .lg .middle } **Multi-dataset fetch & persist**
 
     ---
 
-    Download OHLCV data by symbol and date range. When `save_path` is set, data is automatically sliced into monthly Parquet files on disk.
+    Download OHLCV or shares-outstanding by symbol and date range via a `Dataset` enum. When `save_path` is set, data is automatically sliced into monthly Parquet files on disk.
 
     [:octicons-arrow-right-24: API Reference](api.md)
 
@@ -63,7 +63,7 @@ pip install marketgoblin
 
     ---
 
-    `{save_path}/{provider}/ohlcv/{adjusted|raw}/{SYMBOL}/{SYMBOL}_{YYYY-MM}.pq` — every file is inspectable and portable with any Parquet reader.
+    OHLCV: `{save_path}/{provider}/ohlcv/{adjusted|raw}/{SYMBOL}/{SYMBOL}_{YYYY-MM}.pq`. Shares: `{save_path}/{provider}/shares/{SYMBOL}/{SYMBOL}_{YYYY-MM}.pq`. Every file is inspectable and portable with any Parquet reader.
 
 </div>
 
@@ -80,6 +80,23 @@ pip install marketgoblin
 
     lf = goblin.fetch("AAPL", "2024-01-01", "2024-03-31", parse_dates=True)
     print(lf.collect())
+    ```
+
+=== "Shares outstanding"
+
+    ```python
+    from marketgoblin import Dataset, MarketGoblin
+
+    goblin = MarketGoblin(provider="yahoo", save_path="./data")
+
+    shares = goblin.fetch(
+        "AAPL",
+        "2024-01-01",
+        "2024-03-31",
+        dataset=Dataset.SHARES,
+        parse_dates=True,
+    )
+    print(shares.collect())
     ```
 
 === "Load from disk"
@@ -142,5 +159,14 @@ pip install marketgoblin
 | Date on disk | `int32` YYYYMMDD (e.g. `20240101`) — use `parse_dates=True` to get `pl.Date` |
 | OHLC columns | `float32` |
 | Volume column | `int64` |
-| Parquet path | `{save_path}/{provider}/ohlcv/{adjusted\|raw}/{SYMBOL}/{SYMBOL}_{YYYY-MM}.pq` |
-| JSON sidecar | Same path, `.json` — row count, date range, OHLCV stats, missing trading days |
+| Shares column | `int64` |
+| OHLCV parquet path | `{save_path}/{provider}/ohlcv/{adjusted\|raw}/{SYMBOL}/{SYMBOL}_{YYYY-MM}.pq` |
+| SHARES parquet path | `{save_path}/{provider}/shares/{SYMBOL}/{SYMBOL}_{YYYY-MM}.pq` |
+| JSON sidecar | Same path, `.json` — row count, date range, per-dataset stats (OHLCV also records missing trading days) |
+
+## Datasets
+
+| Dataset | Providers | Notes |
+|---|---|---|
+| `Dataset.OHLCV` | `yahoo`, `csv` | Daily open/high/low/close/volume. `adjusted=True` uses split/dividend-adjusted prices. |
+| `Dataset.SHARES` | `yahoo` | Shares outstanding — sparse, corporate-action-driven cadence. Deduplicated to one row per day (last value wins). |

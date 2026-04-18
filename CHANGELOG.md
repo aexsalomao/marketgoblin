@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `Dataset` enum (`OHLCV`, `SHARES`) exported from the package root for dataset selection
+- Shares-outstanding dataset via Yahoo (`yfinance.Ticker.get_shares_full`) — sparse, corporate-action-driven series deduplicated to one row per day
+- `MarketGoblin.supported_datasets` property exposing the datasets a provider supports
+- `dataset=` parameter on `fetch()`, `load()`, and `fetch_many()` (defaults to `Dataset.OHLCV` — existing callers unchanged)
+- `normalize_shares()` in `_normalize.py` and `build_shares()` in `_metadata.py`
+- Dataset-aware path scheme in `DiskStorage`: SHARES slices live at `{provider}/shares/{SYMBOL}/{SYMBOL}_{YYYY-MM}.pq` (no `adjusted|raw` segment)
+
+### Changed
+- Per-source dataset dispatch: sources declare supported datasets via `_build_dispatch()`; `BaseSource.fetch()` takes a `Dataset` as its first argument
+- `adjusted=False` with a non-OHLCV dataset now raises `ValueError` at the public API boundary (no silent fallback)
+
 ## [0.1.2] - 2026-04-17
 
 ### Removed
