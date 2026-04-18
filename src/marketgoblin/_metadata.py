@@ -1,6 +1,6 @@
 # Metadata sidecar helpers.
-# build() computes per-slice summary stats (row count, date range, missing
-# trading days); write() atomically persists the dict as a JSON sidecar.
+# build_ohlcv / build_shares compute per-slice summary stats; write() atomically
+# persists the dict as a JSON sidecar next to the .pq file.
 
 import calendar
 import json
@@ -12,7 +12,7 @@ from typing import Any
 import polars as pl
 
 
-def build(
+def build_ohlcv(
     chunk: pl.DataFrame,
     provider: str,
     symbol: str,
@@ -21,11 +21,10 @@ def build(
     price_adjusted: bool = True,
     currency: str = "USD",
 ) -> dict[str, Any]:
-    """Build a metadata dict for a saved parquet slice.
+    """Build a metadata dict for a saved OHLCV parquet slice.
 
     Computes summary stats (row count, date range, OHLCV min/max) and derives
     missing trading days by comparing chunk dates against all weekdays in the month.
-    The returned dict is intended to be written as a JSON sidecar via write().
     """
     stats = chunk.select(
         [
@@ -70,6 +69,43 @@ def build(
         "close_max": float(stats["close_max"]),
         "volume_min": float(stats["volume_min"]),
         "volume_max": float(stats["volume_max"]),
+    }
+
+
+def build_shares(
+    chunk: pl.DataFrame,
+    provider: str,
+    symbol: str,
+    ym: str,
+    file_size_bytes: int,
+) -> dict[str, Any]:
+    """Build a metadata dict for a saved shares-outstanding parquet slice.
+
+    Shares are reported at irregular cadence (corporate-action driven), so no
+    'expected days' / 'missing days' analysis applies — that's OHLCV-specific.
+    """
+    stats = chunk.select(
+        [
+            pl.col("date").min().alias("start_date"),
+            pl.col("date").max().alias("end_date"),
+            pl.len().alias("row_count"),
+            pl.col("shares").min().alias("shares_min"),
+            pl.col("shares").max().alias("shares_max"),
+        ]
+    ).row(0, named=True)
+
+    return {
+        "symbol": symbol,
+        "provider": provider,
+        "year_month": ym,
+        "row_count": stats["row_count"],
+        "start_date": stats["start_date"],
+        "end_date": stats["end_date"],
+        "columns": chunk.columns,
+        "downloaded_at": datetime.now().isoformat(timespec="seconds"),
+        "file_size_bytes": file_size_bytes,
+        "shares_min": int(stats["shares_min"]),
+        "shares_max": int(stats["shares_max"]),
     }
 
 

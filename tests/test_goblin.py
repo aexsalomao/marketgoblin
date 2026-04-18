@@ -3,7 +3,7 @@ from unittest.mock import patch
 import polars as pl
 import pytest
 
-from marketgoblin import MarketGoblin
+from marketgoblin import Dataset, MarketGoblin
 
 
 def make_lf(symbol: str) -> pl.LazyFrame:
@@ -68,3 +68,43 @@ def test_fetch_many_empty_symbols(goblin):
 def test_unknown_provider_raises():
     with pytest.raises(ValueError, match="Unknown provider"):
         MarketGoblin(provider="bloomberg")
+
+
+def test_supported_datasets_yahoo(goblin):
+    assert Dataset.OHLCV in goblin.supported_datasets
+    assert Dataset.SHARES in goblin.supported_datasets
+
+
+def test_supported_datasets_csv(tmp_path):
+    g = MarketGoblin(provider="csv", data_dir=tmp_path)
+    assert Dataset.OHLCV in g.supported_datasets
+    assert Dataset.SHARES not in g.supported_datasets
+
+
+def test_fetch_rejects_adjusted_with_shares(goblin):
+    with pytest.raises(ValueError, match="adjusted"):
+        goblin.fetch("AAPL", "2024-01-01", "2024-01-31", dataset=Dataset.SHARES, adjusted=False)
+
+
+def test_load_rejects_adjusted_with_shares(tmp_path):
+    g = MarketGoblin(provider="yahoo", save_path=tmp_path)
+    with pytest.raises(ValueError, match="adjusted"):
+        g.load("AAPL", "2024-01-01", "2024-01-31", dataset=Dataset.SHARES, adjusted=False)
+
+
+def test_fetch_many_rejects_adjusted_with_shares(goblin):
+    with pytest.raises(ValueError, match="adjusted"):
+        goblin.fetch_many(
+            ["AAPL"], "2024-01-01", "2024-01-31", dataset=Dataset.SHARES, adjusted=False
+        )
+
+
+def test_fetch_rejects_unsupported_dataset_via_csv(tmp_path):
+    g = MarketGoblin(provider="csv", data_dir=tmp_path)
+    with pytest.raises(ValueError, match="does not support dataset"):
+        g.fetch("AAPL", "2024-01-01", "2024-01-31", dataset=Dataset.SHARES)
+
+
+def test_load_without_save_path_raises(goblin):
+    with pytest.raises(RuntimeError, match="save_path"):
+        goblin.load("AAPL", "2024-01-01", "2024-01-31")

@@ -3,6 +3,7 @@ from pathlib import Path
 import polars as pl
 import pytest
 
+from marketgoblin.datasets import Dataset
 from marketgoblin.sources.csv_source import CSVSource
 
 
@@ -24,23 +25,23 @@ def source(tmp_path: Path) -> CSVSource:
 
 
 def test_fetch_returns_lazy_frame(source: CSVSource) -> None:
-    lf = source.fetch("AAPL", "2024-01-01", "2024-12-31")
+    lf = source.fetch(Dataset.OHLCV, "AAPL", "2024-01-01", "2024-12-31")
     assert isinstance(lf, pl.LazyFrame)
 
 
 def test_fetch_row_count(source: CSVSource) -> None:
-    df = source.fetch("AAPL", "2024-01-01", "2024-12-31").collect()
+    df = source.fetch(Dataset.OHLCV, "AAPL", "2024-01-01", "2024-12-31").collect()
     assert len(df) == 3
 
 
 def test_fetch_date_filter(source: CSVSource) -> None:
-    df = source.fetch("AAPL", "2024-01-01", "2024-01-31").collect()
+    df = source.fetch(Dataset.OHLCV, "AAPL", "2024-01-01", "2024-01-31").collect()
     assert len(df) == 2
     assert df["date"].to_list() == [20240102, 20240103]
 
 
 def test_fetch_schema(source: CSVSource) -> None:
-    df = source.fetch("AAPL", "2024-01-01", "2024-12-31").collect()
+    df = source.fetch(Dataset.OHLCV, "AAPL", "2024-01-01", "2024-12-31").collect()
     assert df.schema["date"] == pl.Int32
     assert df.schema["open"] == pl.Float32
     assert df.schema["high"] == pl.Float32
@@ -52,12 +53,17 @@ def test_fetch_schema(source: CSVSource) -> None:
 def test_fetch_missing_file_raises(tmp_path: Path) -> None:
     source = CSVSource(data_dir=tmp_path)
     with pytest.raises(ValueError, match="No CSV file found"):
-        source.fetch("MISSING", "2024-01-01", "2024-12-31")
+        source.fetch(Dataset.OHLCV, "MISSING", "2024-01-01", "2024-12-31")
 
 
 def test_fetch_symbol_uppercased(source: CSVSource) -> None:
-    df = source.fetch("aapl", "2024-01-01", "2024-12-31").collect()
+    df = source.fetch(Dataset.OHLCV, "aapl", "2024-01-01", "2024-12-31").collect()
     assert df["symbol"].to_list() == ["AAPL"] * 3
+
+
+def test_fetch_shares_unsupported(source: CSVSource) -> None:
+    with pytest.raises(ValueError, match="does not support dataset"):
+        source.fetch(Dataset.SHARES, "AAPL", "2024-01-01", "2024-12-31")
 
 
 def test_fetch_via_market_goblin(tmp_path: Path) -> None:

@@ -1,14 +1,15 @@
 # CSVSource — OHLCV provider backed by local CSV files.
 # Reads {data_dir}/{SYMBOL}.csv, filters by date range, and returns a
-# normalized LazyFrame. Useful for backtesting and offline use.
+# normalized LazyFrame. Useful for backtesting and offline use. OHLCV-only.
 
 from pathlib import Path
 from typing import Any
 
 import polars as pl
 
-from marketgoblin._normalize import normalize
-from marketgoblin.sources.base import BaseSource
+from marketgoblin._normalize import normalize_ohlcv
+from marketgoblin.datasets import Dataset
+from marketgoblin.sources.base import BaseSource, Fetcher
 
 
 class CSVSource(BaseSource):
@@ -37,7 +38,15 @@ class CSVSource(BaseSource):
         super().__init__(api_key, **kwargs)
         self.data_dir = Path(data_dir)
 
-    def fetch(self, symbol: str, start: str, end: str, adjusted: bool = True) -> pl.LazyFrame:
+    def _build_dispatch(self) -> dict[Dataset, Fetcher]:
+        return {Dataset.OHLCV: self._fetch_ohlcv}
+
+    def _fetch_ohlcv(
+        self, symbol: str, start: str, end: str, adjusted: bool = True
+    ) -> pl.LazyFrame:
+        # `adjusted` is meaningless for CSV — files are pre-adjusted by the caller.
+        del adjusted
+
         path = self.data_dir / f"{symbol.upper()}.csv"
         if not path.exists():
             raise ValueError(f"No CSV file found for {symbol} at {path}")
@@ -55,5 +64,4 @@ class CSVSource(BaseSource):
             )
         )
 
-        lf = normalize(lf).filter(pl.col("date").is_between(start_int, end_int))
-        return lf
+        return normalize_ohlcv(lf).filter(pl.col("date").is_between(start_int, end_int))

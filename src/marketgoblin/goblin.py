@@ -1,6 +1,7 @@
 # MarketGoblin — public API facade.
 # Wraps a data source (Yahoo, CSV, ...) and optional DiskStorage, exposing
 # fetch / load / fetch_many with validation, rate limiting, and logging.
+# Datasets (OHLCV, shares, ...) are dispatched at the source layer.
 
 import logging
 import threading
@@ -13,6 +14,7 @@ from typing import Any
 import polars as pl
 
 from marketgoblin._normalize import parse_dates as _parse_dates
+from marketgoblin.datasets import Dataset
 from marketgoblin.sources.base import BaseSource
 from marketgoblin.sources.csv_source import CSVSource
 from marketgoblin.sources.yahoo import YahooSource
@@ -39,6 +41,20 @@ def _validate_dates(start: str, end: str) -> None:
         raise ValueError(f"start must be before end. Got {start} >= {end}")
 
 
+def _validate_dataset_args(dataset: Dataset, adjusted: bool) -> None:
+    """Reject incoherent combinations at the public boundary.
+
+    `adjusted` only applies to OHLCV (split/dividend price adjustment). Passing
+    `adjusted=False` with any other dataset is a usage error — fail loud rather
+    than silently ignore.
+    """
+    if dataset != Dataset.OHLCV and not adjusted:
+        raise ValueError(
+            f"`adjusted` parameter only applies to dataset OHLCV, not {dataset}. "
+            f"Drop the argument or set adjusted=True."
+        )
+
+
 class _RateLimiter:
     """Token-bucket rate limiter safe for use across threads."""
 
@@ -57,11 +73,14 @@ class _RateLimiter:
 
 
 class MarketGoblin:
-    """Public API for fetching, saving, and loading OHLCV market data.
+    """Public API for fetching, saving, and loading market data.
 
     Wraps a data source (e.g. Yahoo Finance) and optional disk storage.
     When save_path is provided, fetch() persists data as monthly parquet slices
     and subsequent load() calls read directly from disk without re-downloading.
+
+    Datasets are selected via the `dataset` parameter (default: ``Dataset.OHLCV``).
+    Available datasets per source are exposed via ``goblin.supported_datasets``.
     """
 
     def __init__(
@@ -78,44 +97,53 @@ class MarketGoblin:
         self._source = _SOURCES[provider](api_key=api_key, **source_kwargs)
         self._storage = DiskStorage(save_path) if save_path else None
 
+    @property
+    def supported_datasets(self) -> frozenset[Dataset]:
+        return self._source.supported_datasets
+
     def fetch(
         self,
         symbol: str,
         start: str,
         end: str,
+        dataset: Dataset = Dataset.OHLCV,
         adjusted: bool = True,
         parse_dates: bool = False,
     ) -> pl.LazyFrame:
-        """Download OHLCV data. Saves to disk if save_path was set.
+        """Download data for a symbol. Saves to disk if save_path was set.
 
         Args:
             symbol: Ticker symbol e.g. 'AAPL'.
             start: Start date as 'YYYY-MM-DD'.
             end: End date as 'YYYY-MM-DD'.
-            adjusted: If True, use split/dividend adjusted prices (default).
+            dataset: Which dataset to fetch (default OHLCV).
+            adjusted: If True, use split/dividend adjusted prices. OHLCV only.
             parse_dates: If True, return date as pl.Date instead of int32.
 
         Raises:
-            ValueError: If dates are malformed or start >= end.
+            ValueError: If dates are malformed, start >= end, or adjusted is
+                used with a non-OHLCV dataset.
         """
         _validate_dates(start, end)
-        price_type = "adjusted" if adjusted else "raw"
+        _validate_dataset_args(dataset, adjusted)
+
         logger.info(
-            "fetch started | symbol=%s provider=%s range=%s:%s %s",
+            "fetch started | symbol=%s provider=%s dataset=%s range=%s:%s adjusted=%s",
             symbol,
             self._provider,
+            dataset,
             start,
             end,
-            price_type,
+            adjusted,
         )
         t0 = time.perf_counter()
 
-        lf = self._source.fetch(symbol, start, end, adjusted=adjusted)
+        lf = self._source.fetch(dataset, symbol, start, end, adjusted=adjusted)
 
         if self._storage:
-            self._storage.save(self._provider, symbol, lf, adjusted=adjusted)
+            self._storage.save(self._provider, symbol, dataset, lf, adjusted=adjusted)
             lf = self._storage.load(
-                self._provider, symbol, start, end, parse_dates, adjusted=adjusted
+                self._provider, symbol, dataset, start, end, parse_dates, adjusted=adjusted
             )
             elapsed = time.perf_counter() - t0
             logger.info("fetch complete | symbol=%s saved=True elapsed=%.2fs", symbol, elapsed)
@@ -136,28 +164,24 @@ class MarketGoblin:
         symbol: str,
         start: str,
         end: str,
+        dataset: Dataset = Dataset.OHLCV,
         adjusted: bool = True,
         parse_dates: bool = False,
     ) -> pl.LazyFrame:
         """Load previously saved data from disk.
 
-        Args:
-            symbol: Ticker symbol e.g. 'AAPL'.
-            start: Start date as 'YYYY-MM-DD'.
-            end: End date as 'YYYY-MM-DD'.
-            adjusted: If True, load from adjusted store (default).
-            parse_dates: If True, return date as pl.Date instead of int32.
-
         Raises:
-            ValueError: If dates are malformed or start >= end.
+            ValueError: If dates are malformed, start >= end, or adjusted is
+                used with a non-OHLCV dataset.
             RuntimeError: If save_path was not set.
         """
         _validate_dates(start, end)
+        _validate_dataset_args(dataset, adjusted)
         if not self._storage:
             raise RuntimeError("load() requires save_path to be set.")
 
         return self._storage.load(
-            self._provider, symbol, start, end, parse_dates, adjusted=adjusted
+            self._provider, symbol, dataset, start, end, parse_dates, adjusted=adjusted
         )
 
     def fetch_many(
@@ -165,30 +189,30 @@ class MarketGoblin:
         symbols: list[str],
         start: str,
         end: str,
+        dataset: Dataset = Dataset.OHLCV,
         adjusted: bool = True,
         parse_dates: bool = False,
         max_workers: int = 8,
         requests_per_second: float = 2.0,
     ) -> dict[str, pl.LazyFrame]:
-        """Download OHLCV data for multiple symbols concurrently.
+        """Download data for multiple symbols concurrently.
 
         Failed symbols are logged and excluded from the result — they never
         crash the batch.
 
-        Args:
-            symbols: List of ticker symbols e.g. ['AAPL', 'MSFT'].
-            start: Start date as 'YYYY-MM-DD'.
-            end: End date as 'YYYY-MM-DD'.
-            adjusted: If True, use split/dividend adjusted prices (default).
-            parse_dates: If True, return date as pl.Date instead of int32.
-            max_workers: Max concurrent threads (default 8).
-            requests_per_second: Max requests per second across all threads (default 2.0).
-
         Raises:
-            ValueError: If dates are malformed or start >= end.
+            ValueError: If dates are malformed, start >= end, or adjusted is
+                used with a non-OHLCV dataset.
         """
         _validate_dates(start, end)
-        logger.info("fetch_many started | symbols=%d range=%s:%s", len(symbols), start, end)
+        _validate_dataset_args(dataset, adjusted)
+        logger.info(
+            "fetch_many started | symbols=%d dataset=%s range=%s:%s",
+            len(symbols),
+            dataset,
+            start,
+            end,
+        )
         t0 = time.perf_counter()
 
         limiter = _RateLimiter(requests_per_second)
@@ -196,7 +220,7 @@ class MarketGoblin:
 
         def _rate_limited_fetch(symbol: str) -> pl.LazyFrame:
             limiter.acquire()
-            return self.fetch(symbol, start, end, adjusted, parse_dates)
+            return self.fetch(symbol, start, end, dataset, adjusted, parse_dates)
 
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
             futures = {pool.submit(_rate_limited_fetch, symbol): symbol for symbol in symbols}
