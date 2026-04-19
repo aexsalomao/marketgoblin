@@ -53,9 +53,7 @@ class YahooSource(BaseSource):
 
     def _fetch_ohlcv(self, symbol: str, start: str, end: str) -> pl.LazyFrame:
         def do_fetch() -> pl.LazyFrame:
-            raw = yf.Ticker(symbol).history(
-                start=start, end=end, auto_adjust=False, actions=False
-            )
+            raw = yf.Ticker(symbol).history(start=start, end=end, auto_adjust=False, actions=False)
             if raw.empty:
                 raise ValueError(f"No OHLCV data returned for {symbol} ({start} to {end})")
 
