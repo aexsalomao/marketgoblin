@@ -8,16 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- `Dataset` enum (`OHLCV`, `SHARES`) exported from the package root for dataset selection
+- `Dataset` enum (`OHLCV`, `SHARES`, `DIVIDENDS`) exported from the package root for dataset selection
 - Shares-outstanding dataset via Yahoo (`yfinance.Ticker.get_shares_full`) — sparse, corporate-action-driven series deduplicated to one row per day
+- Dividends dataset via Yahoo (`yfinance.Ticker.dividends`) — event-driven series filtered to the requested date range
+- `is_adjusted: bool` column on OHLCV frames — adjusted and raw variants now live in a single tidy stacked series
 - `MarketGoblin.supported_datasets` property exposing the datasets a provider supports
 - `dataset=` parameter on `fetch()`, `load()`, and `fetch_many()` (defaults to `Dataset.OHLCV` — existing callers unchanged)
-- `normalize_shares()` in `_normalize.py` and `build_shares()` in `_metadata.py`
-- Dataset-aware path scheme in `DiskStorage`: SHARES slices live at `{provider}/shares/{SYMBOL}/{SYMBOL}_{YYYY-MM}.pq` (no `adjusted|raw` segment)
+- `CSVSource(is_adjusted=...)` init kwarg stamps the variant flag on every row (CSVs hold a single variant by assumption)
+- `normalize_shares()`, `normalize_dividends()` in `_normalize.py` and `build_shares()`, `build_dividends()` in `_metadata.py`
+- Uniform dataset-aware path scheme in `DiskStorage`: `{provider}/{dataset}/{SYMBOL}/{SYMBOL}_{YYYY-MM}.pq` — no `adjusted|raw` segment for any dataset
 
 ### Changed
 - Per-source dataset dispatch: sources declare supported datasets via `_build_dispatch()`; `BaseSource.fetch()` takes a `Dataset` as its first argument
-- `adjusted=False` with a non-OHLCV dataset now raises `ValueError` at the public API boundary (no silent fallback)
+- OHLCV is fetched in a single `yf.Ticker.history(auto_adjust=False)` call — adjusted Open/High/Low are derived locally via the `Adj Close / Close` ratio (zero numerical drift vs yfinance's `auto_adjust=True`, half the network calls)
+- OHLCV metadata sidecar: `price_adjusted` replaced by `has_adjusted` / `has_raw`; missing-days analysis now runs on unique dates; new `unique_days` field
+
+### Removed
+- `adjusted` parameter from `MarketGoblin.fetch()` / `load()` / `fetch_many()`, `BaseSource.fetch()`, per-dataset `Fetcher` signature, and `DiskStorage.save()` / `load()` — OHLCV variants are distinguished by the `is_adjusted` column instead (**breaking**)
 
 ## [0.1.2] - 2026-04-17
 

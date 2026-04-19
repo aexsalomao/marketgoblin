@@ -48,6 +48,19 @@ def test_fetch_schema(source: CSVSource) -> None:
     assert df.schema["low"] == pl.Float32
     assert df.schema["close"] == pl.Float32
     assert df.schema["volume"] == pl.Int64
+    assert df.schema["is_adjusted"] == pl.Boolean
+
+
+def test_fetch_stamps_is_adjusted_default_true(source: CSVSource) -> None:
+    df = source.fetch(Dataset.OHLCV, "AAPL", "2024-01-01", "2024-12-31").collect()
+    assert df["is_adjusted"].to_list() == [True, True, True]
+
+
+def test_fetch_stamps_is_adjusted_false_when_configured(tmp_path: Path) -> None:
+    write_csv(tmp_path, "AAPL")
+    source = CSVSource(data_dir=tmp_path, is_adjusted=False)
+    df = source.fetch(Dataset.OHLCV, "AAPL", "2024-01-01", "2024-12-31").collect()
+    assert df["is_adjusted"].to_list() == [False, False, False]
 
 
 def test_fetch_missing_file_raises(tmp_path: Path) -> None:

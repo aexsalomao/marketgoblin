@@ -3,20 +3,24 @@ import json
 import polars as pl
 import pytest
 
-from marketgoblin._metadata import build_ohlcv, build_shares, write
+from marketgoblin._metadata import build_dividends, build_ohlcv, build_shares, write
 
 
 def make_ohlcv_chunk() -> pl.DataFrame:
-    # Four trading days in Jan 2024: 2nd (Tue) through 5th (Fri)
+    # Four trading days in Jan 2024 (Tue–Fri), stacked adjusted + raw.
+    dates = [20240102, 20240103, 20240104, 20240105]
     return pl.DataFrame(
         {
-            "date": pl.Series([20240102, 20240103, 20240104, 20240105], dtype=pl.Int32),
-            "open": pl.Series([185.0, 186.0, 187.0, 188.0], dtype=pl.Float32),
-            "high": pl.Series([187.0, 188.0, 189.0, 190.0], dtype=pl.Float32),
-            "low": pl.Series([183.0, 184.0, 185.0, 186.0], dtype=pl.Float32),
-            "close": pl.Series([186.0, 187.0, 188.0, 189.0], dtype=pl.Float32),
-            "volume": pl.Series([80_000_000, 75_000_000, 70_000_000, 65_000_000], dtype=pl.Int64),
-            "symbol": ["AAPL"] * 4,
+            "date": pl.Series(dates * 2, dtype=pl.Int32),
+            "open": pl.Series([185.0, 186.0, 187.0, 188.0] * 2, dtype=pl.Float32),
+            "high": pl.Series([187.0, 188.0, 189.0, 190.0] * 2, dtype=pl.Float32),
+            "low": pl.Series([183.0, 184.0, 185.0, 186.0] * 2, dtype=pl.Float32),
+            "close": pl.Series([186.0, 187.0, 188.0, 189.0] * 2, dtype=pl.Float32),
+            "volume": pl.Series(
+                [80_000_000, 75_000_000, 70_000_000, 65_000_000] * 2, dtype=pl.Int64
+            ),
+            "symbol": ["AAPL"] * 8,
+            "is_adjusted": [True] * 4 + [False] * 4,
         }
     )
 
@@ -27,6 +31,16 @@ def make_shares_chunk() -> pl.DataFrame:
             "date": pl.Series([20240102, 20240115, 20240130], dtype=pl.Int32),
             "shares": pl.Series([15_000_000_000, 14_900_000_000, 14_800_000_000], dtype=pl.Int64),
             "symbol": ["AAPL"] * 3,
+        }
+    )
+
+
+def make_dividends_chunk() -> pl.DataFrame:
+    return pl.DataFrame(
+        {
+            "date": pl.Series([20240209], dtype=pl.Int32),
+            "dividend": pl.Series([0.24], dtype=pl.Float32),
+            "symbol": ["AAPL"],
         }
     )
 
@@ -45,6 +59,7 @@ def test_build_ohlcv_has_all_keys(fake_pq):
         "provider",
         "year_month",
         "row_count",
+        "unique_days",
         "start_date",
         "end_date",
         "expected_trading_days",
@@ -52,7 +67,8 @@ def test_build_ohlcv_has_all_keys(fake_pq):
         "columns",
         "downloaded_at",
         "file_size_bytes",
-        "price_adjusted",
+        "has_adjusted",
+        "has_raw",
         "currency",
         "close_min",
         "close_max",
@@ -66,10 +82,12 @@ def test_build_ohlcv_stats(fake_pq):
     meta = build_ohlcv(make_ohlcv_chunk(), "yahoo", "AAPL", "2024-01", 0)
     assert meta["symbol"] == "AAPL"
     assert meta["provider"] == "yahoo"
-    assert meta["row_count"] == 4
+    assert meta["row_count"] == 8
+    assert meta["unique_days"] == 4
     assert meta["start_date"] == 20240102
     assert meta["end_date"] == 20240105
-    assert meta["price_adjusted"] is True
+    assert meta["has_adjusted"] is True
+    assert meta["has_raw"] is True
     assert meta["currency"] == "USD"
 
 
@@ -86,9 +104,31 @@ def test_build_ohlcv_missing_days_includes_holidays(fake_pq):
     assert "2024-01-15" in meta["missing_days"]
 
 
+def test_build_ohlcv_missing_days_dedupes_across_variants(fake_pq):
+    # The chunk has both adjusted and raw rows for each date, so missing-days
+    # analysis must run on unique dates — a stacked chunk should not report a
+    # date as present twice.
+    meta = build_ohlcv(make_ohlcv_chunk(), "yahoo", "AAPL", "2024-01", 0)
+    assert "2024-01-02" not in meta["missing_days"]
+
+
 def test_build_ohlcv_missing_days_readable_format(fake_pq):
     meta = build_ohlcv(make_ohlcv_chunk(), "yahoo", "AAPL", "2024-01", 0)
     assert all(len(d) == 10 and d[4] == "-" and d[7] == "-" for d in meta["missing_days"])
+
+
+def test_build_ohlcv_has_adjusted_only():
+    chunk = make_ohlcv_chunk().filter(pl.col("is_adjusted"))
+    meta = build_ohlcv(chunk, "yahoo", "AAPL", "2024-01", 0)
+    assert meta["has_adjusted"] is True
+    assert meta["has_raw"] is False
+
+
+def test_build_ohlcv_has_raw_only():
+    chunk = make_ohlcv_chunk().filter(~pl.col("is_adjusted"))
+    meta = build_ohlcv(chunk, "yahoo", "AAPL", "2024-01", 0)
+    assert meta["has_adjusted"] is False
+    assert meta["has_raw"] is True
 
 
 def test_write_creates_json(tmp_path, fake_pq):
@@ -104,16 +144,6 @@ def test_write_no_tmp_files_left(tmp_path, fake_pq):
     meta = build_ohlcv(make_ohlcv_chunk(), "yahoo", "AAPL", "2024-01", 0)
     write(meta, fake_pq)
     assert list(tmp_path.glob("*.tmp")) == []
-
-
-def test_build_ohlcv_price_adjusted_true(fake_pq):
-    meta = build_ohlcv(make_ohlcv_chunk(), "yahoo", "AAPL", "2024-01", 0, price_adjusted=True)
-    assert meta["price_adjusted"] is True
-
-
-def test_build_ohlcv_price_adjusted_false(fake_pq):
-    meta = build_ohlcv(make_ohlcv_chunk(), "yahoo", "AAPL", "2024-01", 0, price_adjusted=False)
-    assert meta["price_adjusted"] is False
 
 
 def test_build_shares_has_all_keys(fake_pq):
@@ -148,4 +178,32 @@ def test_build_shares_omits_ohlcv_only_keys(fake_pq):
     meta = build_shares(make_shares_chunk(), "yahoo", "AAPL", "2024-01", 0)
     assert "missing_days" not in meta
     assert "expected_trading_days" not in meta
-    assert "price_adjusted" not in meta
+    assert "has_adjusted" not in meta
+
+
+def test_build_dividends_has_all_keys(fake_pq):
+    meta = build_dividends(make_dividends_chunk(), "yahoo", "AAPL", "2024-02", 0)
+    expected = {
+        "symbol",
+        "provider",
+        "year_month",
+        "row_count",
+        "start_date",
+        "end_date",
+        "columns",
+        "downloaded_at",
+        "file_size_bytes",
+        "currency",
+        "dividend_min",
+        "dividend_max",
+        "dividend_total",
+    }
+    assert set(meta.keys()) == expected
+
+
+def test_build_dividends_stats(fake_pq):
+    meta = build_dividends(make_dividends_chunk(), "yahoo", "AAPL", "2024-02", 0)
+    assert meta["row_count"] == 1
+    assert meta["start_date"] == 20240209
+    assert meta["end_date"] == 20240209
+    assert meta["dividend_total"] == pytest.approx(0.24, rel=1e-3)

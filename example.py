@@ -2,17 +2,21 @@
 Runnable walkthrough of core MarketGoblin functionality.
 
 Demonstrates:
-  - Single-symbol OHLCV fetch + disk persistence
+  - Single-symbol OHLCV fetch + disk persistence (tidy stacked adjusted + raw)
+  - Filtering the tidy frame by ``is_adjusted``
   - Loading saved data back from disk
   - Inspecting the DataFrame schema and a metadata sidecar
   - Batch fetch with fetch_many()
   - Shares-outstanding fetch (separate dataset)
+  - Dividends fetch (separate dataset)
 """
 
 import json
 import logging
 import tempfile
 from pathlib import Path
+
+import polars as pl
 
 from marketgoblin import Dataset, MarketGoblin
 
@@ -33,26 +37,29 @@ with tempfile.TemporaryDirectory() as tmp:
     print(f"Supported datasets: {sorted(d.value for d in goblin.supported_datasets)}")
 
     # -----------------------------------------------------------------------
-    # 1. Single OHLCV fetch — downloads from Yahoo, persists monthly .pq slices
+    # 1. Single OHLCV fetch — tidy stacked frame with is_adjusted column
     # -----------------------------------------------------------------------
     print("\n=== 1. Single OHLCV fetch (AAPL) ===")
     lf = goblin.fetch("AAPL", START, END, parse_dates=True)
     df = lf.collect()
     print(df)
     print(f"\nSchema: {df.schema}")
+    print(f"Adjusted rows: {df.filter(pl.col('is_adjusted')).height}")
+    print(f"Raw rows:      {df.filter(~pl.col('is_adjusted')).height}")
 
     # -----------------------------------------------------------------------
-    # 2. Load OHLCV back from disk
+    # 2. Load OHLCV back from disk, filter to adjusted only
     # -----------------------------------------------------------------------
-    print("\n=== 2. Load OHLCV from disk (AAPL) ===")
-    lf2 = goblin.load("AAPL", START, END, parse_dates=True)
-    df2 = lf2.collect()
-    print(df2)
+    print("\n=== 2. Load OHLCV from disk (AAPL, adjusted only) ===")
+    adjusted_only = (
+        goblin.load("AAPL", START, END, parse_dates=True).filter(pl.col("is_adjusted")).collect()
+    )
+    print(adjusted_only)
 
     # -----------------------------------------------------------------------
     # 3. Inspect a JSON metadata sidecar
     # -----------------------------------------------------------------------
-    print("\n=== 3. Metadata sidecar (first slice) ===")
+    print("\n=== 3. Metadata sidecar (first OHLCV slice) ===")
     sidecars = sorted(save_path.rglob("ohlcv/**/*.json"))
     if sidecars:
         meta = json.loads(sidecars[0].read_text())
@@ -66,13 +73,22 @@ with tempfile.TemporaryDirectory() as tmp:
     results = goblin.fetch_many(SYMBOLS, START, END)
     for symbol, lf in results.items():
         rows = lf.collect().height
-        print(f"  {symbol}: {rows} rows")
+        print(f"  {symbol}: {rows} rows (adjusted + raw stacked)")
 
     # -----------------------------------------------------------------------
     # 5. Shares-outstanding fetch — sparse, irregular cadence
     # -----------------------------------------------------------------------
     print("\n=== 5. Shares fetch (AAPL) ===")
-    shares_lf = goblin.fetch("AAPL", START, END, dataset=Dataset.SHARES, parse_dates=True)
-    shares_df = shares_lf.collect()
+    shares_df = goblin.fetch("AAPL", START, END, dataset=Dataset.SHARES, parse_dates=True).collect()
     print(shares_df)
     print(f"Schema: {shares_df.schema}")
+
+    # -----------------------------------------------------------------------
+    # 6. Dividends fetch — event-driven (typically quarterly)
+    # -----------------------------------------------------------------------
+    print("\n=== 6. Dividends fetch (AAPL) ===")
+    dividends_df = goblin.fetch(
+        "AAPL", START, END, dataset=Dataset.DIVIDENDS, parse_dates=True
+    ).collect()
+    print(dividends_df)
+    print(f"Schema: {dividends_df.schema}")

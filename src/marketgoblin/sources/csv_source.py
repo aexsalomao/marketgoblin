@@ -21,6 +21,10 @@ class CSVSource(BaseSource):
     Expected CSV columns (case-insensitive):
         date (YYYY-MM-DD), open, high, low, close, volume, symbol
 
+    A CSV file is assumed to contain a single variant (adjusted or raw) —
+    marketgoblin stamps the configured ``is_adjusted`` flag on every row. Any
+    ``is_adjusted`` column present in the file is ignored; the init kwarg wins.
+
     Example::
 
         goblin = MarketGoblin(provider="csv", data_dir="./csv_files")
@@ -33,20 +37,17 @@ class CSVSource(BaseSource):
         self,
         api_key: str | None = None,
         data_dir: str | Path = ".",
+        is_adjusted: bool = True,
         **kwargs: Any,
     ) -> None:
         super().__init__(api_key, **kwargs)
         self.data_dir = Path(data_dir)
+        self.is_adjusted = is_adjusted
 
     def _build_dispatch(self) -> dict[Dataset, Fetcher]:
         return {Dataset.OHLCV: self._fetch_ohlcv}
 
-    def _fetch_ohlcv(
-        self, symbol: str, start: str, end: str, adjusted: bool = True
-    ) -> pl.LazyFrame:
-        # `adjusted` is meaningless for CSV — files are pre-adjusted by the caller.
-        del adjusted
-
+    def _fetch_ohlcv(self, symbol: str, start: str, end: str) -> pl.LazyFrame:
         path = self.data_dir / f"{symbol.upper()}.csv"
         if not path.exists():
             raise ValueError(f"No CSV file found for {symbol} at {path}")
@@ -61,6 +62,7 @@ class CSVSource(BaseSource):
             .with_columns(
                 pl.col("date").str.to_date("%Y-%m-%d"),
                 pl.col("symbol").str.to_uppercase(),
+                pl.lit(self.is_adjusted).alias("is_adjusted"),
             )
         )
 

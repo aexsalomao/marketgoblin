@@ -9,13 +9,14 @@ from marketgoblin import Dataset, MarketGoblin
 def make_lf(symbol: str) -> pl.LazyFrame:
     return pl.DataFrame(
         {
-            "date": pl.Series([20240102, 20240103], dtype=pl.Int32),
-            "open": pl.Series([100.0, 101.0], dtype=pl.Float32),
-            "high": pl.Series([102.0, 103.0], dtype=pl.Float32),
-            "low": pl.Series([98.0, 99.0], dtype=pl.Float32),
-            "close": pl.Series([101.0, 102.0], dtype=pl.Float32),
-            "volume": pl.Series([1_000_000, 2_000_000], dtype=pl.Int64),
-            "symbol": [symbol, symbol],
+            "date": pl.Series([20240102, 20240102, 20240103, 20240103], dtype=pl.Int32),
+            "open": pl.Series([100.0, 99.0, 101.0, 100.0], dtype=pl.Float32),
+            "high": pl.Series([102.0, 101.0, 103.0, 102.0], dtype=pl.Float32),
+            "low": pl.Series([98.0, 97.0, 99.0, 98.0], dtype=pl.Float32),
+            "close": pl.Series([101.0, 100.0, 102.0, 101.0], dtype=pl.Float32),
+            "volume": pl.Series([1_000_000, 1_000_000, 2_000_000, 2_000_000], dtype=pl.Int64),
+            "symbol": [symbol] * 4,
+            "is_adjusted": [True, False, True, False],
         }
     ).lazy()
 
@@ -73,30 +74,24 @@ def test_unknown_provider_raises():
 def test_supported_datasets_yahoo(goblin):
     assert Dataset.OHLCV in goblin.supported_datasets
     assert Dataset.SHARES in goblin.supported_datasets
+    assert Dataset.DIVIDENDS in goblin.supported_datasets
 
 
 def test_supported_datasets_csv(tmp_path):
     g = MarketGoblin(provider="csv", data_dir=tmp_path)
     assert Dataset.OHLCV in g.supported_datasets
     assert Dataset.SHARES not in g.supported_datasets
+    assert Dataset.DIVIDENDS not in g.supported_datasets
 
 
-def test_fetch_rejects_adjusted_with_shares(goblin):
-    with pytest.raises(ValueError, match="adjusted"):
-        goblin.fetch("AAPL", "2024-01-01", "2024-01-31", dataset=Dataset.SHARES, adjusted=False)
+def test_fetch_rejects_bad_dates(goblin):
+    with pytest.raises(ValueError, match="YYYY-MM-DD"):
+        goblin.fetch("AAPL", "not-a-date", "2024-01-31")
 
 
-def test_load_rejects_adjusted_with_shares(tmp_path):
-    g = MarketGoblin(provider="yahoo", save_path=tmp_path)
-    with pytest.raises(ValueError, match="adjusted"):
-        g.load("AAPL", "2024-01-01", "2024-01-31", dataset=Dataset.SHARES, adjusted=False)
-
-
-def test_fetch_many_rejects_adjusted_with_shares(goblin):
-    with pytest.raises(ValueError, match="adjusted"):
-        goblin.fetch_many(
-            ["AAPL"], "2024-01-01", "2024-01-31", dataset=Dataset.SHARES, adjusted=False
-        )
+def test_fetch_rejects_inverted_dates(goblin):
+    with pytest.raises(ValueError, match="start must be before end"):
+        goblin.fetch("AAPL", "2024-03-01", "2024-01-31")
 
 
 def test_fetch_rejects_unsupported_dataset_via_csv(tmp_path):

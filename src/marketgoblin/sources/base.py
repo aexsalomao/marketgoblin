@@ -10,10 +10,10 @@ import polars as pl
 
 from marketgoblin.datasets import Dataset
 
-# Each fetcher receives (symbol, start, end, adjusted) and returns a normalized
-# LazyFrame. `adjusted` is OHLCV-specific; non-OHLCV fetchers must accept and
-# ignore it so the dispatch table has a uniform signature.
-Fetcher = Callable[[str, str, str, bool], pl.LazyFrame]
+# Each fetcher receives (symbol, start, end) and returns a normalized LazyFrame.
+# OHLCV fetchers return a tidy stacked frame with an `is_adjusted` bool column
+# carrying both adjusted and raw variants — no separate toggle is needed.
+Fetcher = Callable[[str, str, str], pl.LazyFrame]
 
 
 class BaseSource(ABC):
@@ -41,7 +41,6 @@ class BaseSource(ABC):
         symbol: str,
         start: str,
         end: str,
-        adjusted: bool = True,
     ) -> pl.LazyFrame:
         """Dispatch to the per-dataset fetcher. Raises if dataset unsupported."""
         handler = self._dispatch.get(dataset)
@@ -50,4 +49,4 @@ class BaseSource(ABC):
             raise ValueError(
                 f"Source '{self.name}' does not support dataset '{dataset}'. Supported: {supported}"
             )
-        return handler(symbol, start, end, adjusted)
+        return handler(symbol, start, end)
