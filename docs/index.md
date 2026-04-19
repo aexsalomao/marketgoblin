@@ -31,7 +31,7 @@ pip install marketgoblin
 
     ---
 
-    Download OHLCV or shares-outstanding by symbol and date range via a `Dataset` enum. When `save_path` is set, data is automatically sliced into monthly Parquet files on disk.
+    Download OHLCV, shares-outstanding, or dividends by symbol and date range via a `Dataset` enum. When `save_path` is set, data is automatically sliced into monthly Parquet files on disk.
 
     [:octicons-arrow-right-24: API Reference](api.md)
 
@@ -63,7 +63,7 @@ pip install marketgoblin
 
     ---
 
-    OHLCV: `{save_path}/{provider}/ohlcv/{adjusted|raw}/{SYMBOL}/{SYMBOL}_{YYYY-MM}.pq`. Shares: `{save_path}/{provider}/shares/{SYMBOL}/{SYMBOL}_{YYYY-MM}.pq`. Every file is inspectable and portable with any Parquet reader.
+    Uniform across datasets: `{save_path}/{provider}/{dataset}/{SYMBOL}/{SYMBOL}_{YYYY-MM}.pq`. OHLCV adjusted + raw share one file, distinguished by the `is_adjusted` column. Every slice is inspectable and portable with any Parquet reader.
 
 </div>
 
@@ -74,12 +74,15 @@ pip install marketgoblin
 === "Fetch & save"
 
     ```python
+    import polars as pl
     from marketgoblin import MarketGoblin
 
     goblin = MarketGoblin(provider="yahoo", save_path="./data")
 
+    # OHLCV is a tidy stacked frame — each day appears twice
+    # (is_adjusted=True / False). Filter to pick a variant.
     lf = goblin.fetch("AAPL", "2024-01-01", "2024-03-31", parse_dates=True)
-    print(lf.collect())
+    print(lf.filter(pl.col("is_adjusted")).collect())
     ```
 
 === "Shares outstanding"
@@ -97,6 +100,23 @@ pip install marketgoblin
         parse_dates=True,
     )
     print(shares.collect())
+    ```
+
+=== "Dividends"
+
+    ```python
+    from marketgoblin import Dataset, MarketGoblin
+
+    goblin = MarketGoblin(provider="yahoo", save_path="./data")
+
+    dividends = goblin.fetch(
+        "AAPL",
+        "2024-01-01",
+        "2024-03-31",
+        dataset=Dataset.DIVIDENDS,
+        parse_dates=True,
+    )
+    print(dividends.collect())
     ```
 
 === "Load from disk"
@@ -159,14 +179,16 @@ pip install marketgoblin
 | Date on disk | `int32` YYYYMMDD (e.g. `20240101`) — use `parse_dates=True` to get `pl.Date` |
 | OHLC columns | `float32` |
 | Volume column | `int64` |
+| `is_adjusted` column | `bool` (OHLCV only — distinguishes adjusted vs raw rows) |
 | Shares column | `int64` |
-| OHLCV parquet path | `{save_path}/{provider}/ohlcv/{adjusted\|raw}/{SYMBOL}/{SYMBOL}_{YYYY-MM}.pq` |
-| SHARES parquet path | `{save_path}/{provider}/shares/{SYMBOL}/{SYMBOL}_{YYYY-MM}.pq` |
-| JSON sidecar | Same path, `.json` — row count, date range, per-dataset stats (OHLCV also records missing trading days) |
+| Dividend column | `float32` |
+| Parquet path | `{save_path}/{provider}/{dataset}/{SYMBOL}/{SYMBOL}_{YYYY-MM}.pq` (uniform across datasets) |
+| JSON sidecar | Same path, `.json` — row count, date range, per-dataset stats (OHLCV also records `has_adjusted`/`has_raw` and missing trading days) |
 
 ## Datasets
 
 | Dataset | Providers | Notes |
 |---|---|---|
-| `Dataset.OHLCV` | `yahoo`, `csv` | Daily open/high/low/close/volume. `adjusted=True` uses split/dividend-adjusted prices. |
+| `Dataset.OHLCV` | `yahoo`, `csv` | Daily open/high/low/close/volume. Tidy stacked: each day appears twice with `is_adjusted=True`/`False`. Adjusted Open/High/Low are derived locally from `Adj Close / Close` (zero numerical drift vs `auto_adjust=True`, half the network calls). |
 | `Dataset.SHARES` | `yahoo` | Shares outstanding — sparse, corporate-action-driven cadence. Deduplicated to one row per day (last value wins). |
+| `Dataset.DIVIDENDS` | `yahoo` | Cash dividend events — typically quarterly. Filtered to the requested `[start, end]` range. |

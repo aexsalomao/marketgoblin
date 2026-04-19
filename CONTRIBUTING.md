@@ -30,18 +30,23 @@ CI runs the same checks automatically on every PR.
 
 ## Adding a Data Source
 
-Subclass `BaseSource`, implement `fetch()`, and register in `goblin.py`:
+Subclass `BaseSource`, declare supported datasets via `_build_dispatch()`, and register in `goblin.py`:
 
 ```python
 # src/marketgoblin/sources/mysource.py
-from marketgoblin.sources.base import BaseSource
 import polars as pl
+
+from marketgoblin import Dataset
+from marketgoblin.sources.base import BaseSource, Fetcher
 
 class MySource(BaseSource):
     name = "mysource"
 
-    def fetch(self, symbol: str, start: str, end: str, adjusted: bool = True) -> pl.LazyFrame:
-        ...  # return a normalized LazyFrame
+    def _build_dispatch(self) -> dict[Dataset, Fetcher]:
+        return {Dataset.OHLCV: self._fetch_ohlcv}
+
+    def _fetch_ohlcv(self, symbol: str, start: str, end: str) -> pl.LazyFrame:
+        ...  # return a normalized LazyFrame with an is_adjusted column
 ```
 
 ```python
@@ -49,7 +54,18 @@ class MySource(BaseSource):
 _SOURCES = {"yahoo": YahooSource, "csv": CSVSource, "mysource": MySource}
 ```
 
-Add tests in `tests/test_mysource.py` covering the happy path and error cases.
+Per-dataset fetchers all share the `(symbol, start, end)` signature. OHLCV fetchers return a tidy stacked frame containing both adjusted and raw rows distinguished by `is_adjusted`.
+
+## Adding a Dataset
+
+Adding a new `Dataset` member is a four-step change:
+
+1. Extend `Dataset` in `src/marketgoblin/datasets.py`
+2. Add `_fetch_<dataset>` to relevant sources and register it in their `_build_dispatch()`
+3. Add `normalize_<dataset>` in `_normalize.py` and `build_<dataset>` in `_metadata.py`
+4. Extend `DiskStorage._build_metadata` dispatch in `storage/disk.py`
+
+Add tests in `tests/test_<thing>.py` covering the happy path and error cases.
 
 ## Code Style
 
