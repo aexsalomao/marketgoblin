@@ -34,9 +34,7 @@ def _market_path(market: str) -> Path:
 def _normalize_market(market: str) -> str:
     upper = market.upper()
     if upper not in _SUPPORTED_MARKETS:
-        raise ValueError(
-            f"Unknown market '{market}'. Supported: {sorted(_SUPPORTED_MARKETS)}"
-        )
+        raise ValueError(f"Unknown market '{market}'. Supported: {sorted(_SUPPORTED_MARKETS)}")
     return upper
 
 

@@ -88,18 +88,14 @@ def test_parse_us_sector_indices_rolls_counts_up_industry_to_group(sample_fetche
 
     for sector in mapping.sectors:
         for group in sector.industry_groups:
-            assert group.constituent_count == sum(
-                i.constituent_count for i in group.industries
-            )
+            assert group.constituent_count == sum(i.constituent_count for i in group.industries)
 
 
 def test_parse_us_sector_indices_rolls_counts_up_group_to_sector(sample_fetcher):
     mapping = parse_us_sector_indices(fetcher=sample_fetcher)
 
     for sector in mapping.sectors:
-        assert sector.constituent_count == sum(
-            g.constituent_count for g in sector.industry_groups
-        )
+        assert sector.constituent_count == sum(g.constituent_count for g in sector.industry_groups)
 
 
 def test_parse_us_sector_indices_attributes_scraped_count_to_correct_sub_industry(
@@ -255,9 +251,7 @@ def test_sector_index_from_dict_rebuilds_nested_tree():
 
     assert isinstance(sector.industry_groups[0], IndustryGroup)
     assert isinstance(sector.industry_groups[0].industries[0], Industry)
-    assert isinstance(
-        sector.industry_groups[0].industries[0].sub_industries[0], SubIndustry
-    )
+    assert isinstance(sector.industry_groups[0].industries[0].sub_industries[0], SubIndustry)
 
 
 # ---------- Public API ----------
@@ -349,13 +343,9 @@ def test_property_counts_roll_up_correctly_at_every_level(sub_industry_names):
     total = 0
     for sector in mapping.sectors:
         total += sector.constituent_count
-        assert sector.constituent_count == sum(
-            g.constituent_count for g in sector.industry_groups
-        )
+        assert sector.constituent_count == sum(g.constituent_count for g in sector.industry_groups)
         for group in sector.industry_groups:
-            assert group.constituent_count == sum(
-                i.constituent_count for i in group.industries
-            )
+            assert group.constituent_count == sum(i.constituent_count for i in group.industries)
             for industry in group.industries:
                 assert industry.constituent_count == sum(
                     s.constituent_count for s in industry.sub_industries
@@ -368,9 +358,9 @@ def test_property_counts_roll_up_correctly_at_every_level(sub_industry_names):
 @settings(max_examples=30, deadline=None)
 def test_property_mapping_roundtrips_through_json(sub_industry_names):
     mapping = parse_us_sector_indices(
-        fetcher=lambda _url: _html_from_constituents(sub_industry_names)
-        if sub_industry_names
-        else _SAMPLE_HTML
+        fetcher=lambda _url: (
+            _html_from_constituents(sub_industry_names) if sub_industry_names else _SAMPLE_HTML
+        )
     )
 
     reloaded = SectorIndexMapping.from_dict(json.loads(json.dumps(mapping.to_dict())))
@@ -381,9 +371,7 @@ def test_property_mapping_roundtrips_through_json(sub_industry_names):
 @given(st.sampled_from(_LEAF_NAMES))
 @settings(max_examples=30, deadline=None)
 def test_property_each_sub_industry_rolls_up_to_exactly_one_sector(sub_name):
-    mapping = parse_us_sector_indices(
-        fetcher=lambda _url: _html_from_constituents([sub_name])
-    )
+    mapping = parse_us_sector_indices(fetcher=lambda _url: _html_from_constituents([sub_name]))
 
     sectors_with_count = [s for s in mapping.sectors if s.constituent_count > 0]
     assert len(sectors_with_count) == 1

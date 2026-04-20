@@ -193,9 +193,7 @@ class _WikitableParser(HTMLParser):
         if not self._current_row:
             return
         if self._header_index is None:
-            self._header_index = {
-                cell.lower(): idx for idx, cell in enumerate(self._current_row)
-            }
+            self._header_index = {cell.lower(): idx for idx, cell in enumerate(self._current_row)}
             return
         row = {
             name: self._current_row[idx]
@@ -291,9 +289,7 @@ def _build_mapping(
             "Update gics_taxonomy_us.json before refreshing."
         )
 
-    unknown_sectors = {
-        sector for sector, _ in constituents if sector not in _US_SECTOR_TICKERS
-    }
+    unknown_sectors = {sector for sector, _ in constituents if sector not in _US_SECTOR_TICKERS}
     if unknown_sectors:
         raise ValueError(
             f"Unexpected GICS sectors from upstream: {sorted(unknown_sectors)}. "
