@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-04-20
+
+### Added
+- `marketgoblin.sector_indices` — public module exposing refreshable US GICS sector → index/ETF mappings
+- `SectorIndexMapping`, `SectorIndex`, `IndustryGroup`, `Industry`, `SubIndustry` dataclasses — full 4-level GICS tree (sector → industry group → industry → sub-industry) with per-level GICS codes and `constituent_count`
+- `load_sector_indices(market="US")` — read the shipped JSON snapshot (`src/marketgoblin/_sector_indices_data/us.json`)
+- `refresh_sector_indices(market="US", output_path=None)` — re-run the parser against the S&P 500 Wikipedia constituents page and rewrite the snapshot
+- Curated GICS 2023 taxonomy shipped as `gics_taxonomy_us.json` (11 sectors, 25 industry groups, 73 industries, 163 sub-industries) — parser joins scraped constituents against it and rolls counts up the hierarchy; unknown upstream sub-industries fail loud
+- `TODO.md` roadmap at the repo root tracking coverage phases (US index families, international markets) and parser hardening
+- `hypothesis>=6.100` added to the `dev` extra — powers property tests for rollup invariants (sum-of-children == parent at every level) and JSON roundtrip
+
 ## [0.3.0] - 2026-04-20
 
 ### Added
