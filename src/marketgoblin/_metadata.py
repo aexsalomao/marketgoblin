@@ -156,9 +156,13 @@ def build_dividends(
     }
 
 
-def write(metadata: dict[str, Any], path: Path) -> None:
-    """Atomically write metadata as JSON sidecar next to the .pq file."""
-    json_path = path.with_suffix(".json")
-    tmp = json_path.with_name(json_path.name + ".tmp")
-    tmp.write_text(json.dumps(metadata, indent=2))
-    os.replace(tmp, json_path)
+def write(data: dict[str, Any], path: Path) -> None:
+    """Atomically write a dict as JSON at ``path``. Creates parent dirs if needed.
+
+    Used for parquet sidecars and for standalone metadata/classification records.
+    ``default=str`` keeps non-JSON-native values (Path, Enum) from exploding.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2, default=str))
+    os.replace(tmp, path)

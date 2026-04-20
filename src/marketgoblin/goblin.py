@@ -14,11 +14,13 @@ from typing import Any
 import polars as pl
 
 from marketgoblin._normalize import parse_dates as _parse_dates
+from marketgoblin.classification import Classification
 from marketgoblin.datasets import Dataset
 from marketgoblin.sources.base import BaseSource
 from marketgoblin.sources.csv_source import CSVSource
 from marketgoblin.sources.yahoo import YahooSource
 from marketgoblin.storage.disk import DiskStorage
+from marketgoblin.ticker_metadata import TickerMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -159,6 +161,88 @@ class MarketGoblin:
             raise RuntimeError("load() requires save_path to be set.")
 
         return self._storage.load(self._provider, symbol, dataset, start, end, parse_dates)
+
+    def fetch_metadata(self, symbol: str, *, fast: bool = False) -> TickerMetadata:
+        """Live-fetch a unified ticker metadata profile. Saves to disk if ``save_path`` was set.
+
+        yfinance exposes metadata through several overlapping surfaces
+        (``info``, ``fast_info``, ``history_metadata``, ``isin``); this method
+        returns them as a single :class:`TickerMetadata`.
+
+        Args:
+            symbol: Ticker symbol (case-insensitive).
+            fast: If True, skip the scraped ``.info`` call. Cheaper but returns
+                only quote-identity + history-metadata fields.
+        """
+        logger.info(
+            "fetch_metadata started | symbol=%s provider=%s fast=%s",
+            symbol,
+            self._provider,
+            fast,
+        )
+        t0 = time.perf_counter()
+        metadata = self._source.fetch_metadata(symbol, fast=fast)
+
+        if self._storage:
+            self._storage.save_metadata(self._provider, metadata)
+
+        elapsed = time.perf_counter() - t0
+        logger.info(
+            "fetch_metadata complete | symbol=%s saved=%s elapsed=%.2fs",
+            symbol,
+            self._storage is not None,
+            elapsed,
+        )
+        return metadata
+
+    def load_metadata(self, symbol: str) -> TickerMetadata:
+        """Load previously saved ticker metadata from disk.
+
+        Raises:
+            RuntimeError: If ``save_path`` was not set.
+            FileNotFoundError: If no metadata exists for ``symbol``.
+        """
+        if not self._storage:
+            raise RuntimeError("load_metadata() requires save_path to be set.")
+        return self._storage.load_metadata(self._provider, symbol)
+
+    def fetch_classification(self, symbol: str) -> Classification:
+        """Live-fetch sector + industry classification for a ticker.
+
+        Saves to disk if ``save_path`` was set. Either the sector or industry
+        sub-profile may be ``None`` if the upstream ticker has no classification
+        key (common for ETFs, crypto, indices).
+        """
+        logger.info(
+            "fetch_classification started | symbol=%s provider=%s",
+            symbol,
+            self._provider,
+        )
+        t0 = time.perf_counter()
+        classification = self._source.fetch_classification(symbol)
+
+        if self._storage:
+            self._storage.save_classification(self._provider, classification)
+
+        elapsed = time.perf_counter() - t0
+        logger.info(
+            "fetch_classification complete | symbol=%s saved=%s elapsed=%.2fs",
+            symbol,
+            self._storage is not None,
+            elapsed,
+        )
+        return classification
+
+    def load_classification(self, symbol: str) -> Classification:
+        """Load previously saved classification from disk.
+
+        Raises:
+            RuntimeError: If ``save_path`` was not set.
+            FileNotFoundError: If no classification exists for ``symbol``.
+        """
+        if not self._storage:
+            raise RuntimeError("load_classification() requires save_path to be set.")
+        return self._storage.load_classification(self._provider, symbol)
 
     def fetch_many(
         self,

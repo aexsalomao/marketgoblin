@@ -133,17 +133,23 @@ def test_build_ohlcv_has_raw_only():
 
 def test_write_creates_json(tmp_path, fake_pq):
     meta = build_ohlcv(make_ohlcv_chunk(), "yahoo", "AAPL", "2024-01", 0)
-    write(meta, fake_pq)
-
     json_path = fake_pq.with_suffix(".json")
+    write(meta, json_path)
+
     assert json_path.exists()
     assert json.loads(json_path.read_text())["symbol"] == "AAPL"
 
 
 def test_write_no_tmp_files_left(tmp_path, fake_pq):
     meta = build_ohlcv(make_ohlcv_chunk(), "yahoo", "AAPL", "2024-01", 0)
-    write(meta, fake_pq)
+    write(meta, fake_pq.with_suffix(".json"))
     assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_write_creates_parent_dirs(tmp_path):
+    nested = tmp_path / "a" / "b" / "c" / "out.json"
+    write({"hello": "world"}, nested)
+    assert nested.exists()
 
 
 def test_build_shares_has_all_keys(fake_pq):

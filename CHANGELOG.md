@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-04-20
+
+### Added
+- `TickerMetadata` dataclass — unified, source-agnostic ticker profile collapsing yfinance's `info` / `fast_info` / `history_metadata` / `isin` into one shape
+- `Classification`, `SectorProfile`, `IndustryProfile` dataclasses — sector + industry classification for a ticker via `yf.Sector` / `yf.Industry`
+- `MarketGoblin.fetch_metadata(symbol, *, fast=False)` / `load_metadata(symbol)` — live-fetch or disk-load ticker metadata
+- `MarketGoblin.fetch_classification(symbol)` / `load_classification(symbol)` — live-fetch or disk-load sector + industry classification
+- `YahooSource.fetch_metadata()` and `fetch_classification()` — yfinance-backed implementations with retry/backoff; classification parallelizes sector + industry lookups
+- `DiskStorage.save_metadata` / `load_metadata` / `save_classification` / `load_classification` — JSON persistence at `{provider}/metadata/{SYMBOL}.json` and `{provider}/classification/{SYMBOL}.json`
+- `JSONSerializable` mixin (`_serialization.py`) — shared `to_dict` / `from_dict` for JSON-backed dataclasses; tolerates unknown keys on load
+
+### Changed
+- `YahooSource` split into orchestration (`yahoo.py`) and pure adapter/parser helpers (`_yahoo_parsing.py`)
+- `_metadata.write()` generalized to accept any target path and create parent dirs (was sidecar-only)
+
 ## [0.2.0] - 2026-04-20
 
 ### Added

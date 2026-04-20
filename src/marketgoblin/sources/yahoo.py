@@ -1,10 +1,15 @@
-# YahooSource — OHLCV + shares-outstanding + dividends provider backed by
-# yfinance. Each dataset has its own _fetch_* method; transient failures retry
-# with exponential backoff via a shared _retry_fetch helper.
+# YahooSource — yfinance-backed provider for OHLCV, shares-outstanding,
+# dividends, ticker metadata, and sector/industry classification. Each
+# dataset has its own _fetch_* method; transient failures retry with
+# exponential backoff via a shared _retry_fetch helper. Pure parsing /
+# yfinance-adapter helpers live in _yahoo_parsing.
 
 import logging
 import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
+from typing import Any, TypeVar
 
 import polars as pl
 import yfinance as yf
@@ -14,13 +19,25 @@ from marketgoblin._normalize import (
     normalize_ohlcv,
     normalize_shares,
 )
+from marketgoblin.classification import Classification
 from marketgoblin.datasets import Dataset
+from marketgoblin.sources._yahoo_parsing import (
+    build_ticker_metadata,
+    fetch_industry_profile,
+    fetch_sector_profile,
+    first_present,
+    safe_dict,
+    safe_isin,
+)
 from marketgoblin.sources.base import BaseSource, Fetcher
+from marketgoblin.ticker_metadata import TickerMetadata
 
 logger = logging.getLogger(__name__)
 
 _MAX_RETRIES = 3
 _RETRY_DELAYS = [1.0, 2.0]  # seconds between attempts (len == _MAX_RETRIES - 1)
+
+_T = TypeVar("_T")
 
 
 class YahooSource(BaseSource):
@@ -150,11 +167,86 @@ class YahooSource(BaseSource):
 
         return self._retry_fetch(do_fetch, symbol)
 
+    def fetch_metadata(self, symbol: str, *, fast: bool = False) -> TickerMetadata:
+        """Build a unified TickerMetadata from yfinance's fragmented endpoints.
+
+        yfinance exposes overlapping metadata surfaces: ``fast_info`` (cheap,
+        cached quote fields), ``history_metadata`` (timezone, first trade date),
+        ``isin()`` (identifier lookup), and ``info`` (scraped profile — slow).
+        This method merges all of them into one :class:`TickerMetadata`.
+
+        Args:
+            symbol: Ticker symbol (case-insensitive; normalized upper-case).
+            fast: If True, skip the scraped ``.info`` call and ``isin()``. Uses
+                only ``fast_info`` + ``history_metadata``. Cheap but sparse.
+        """
+
+        def do_fetch() -> TickerMetadata:
+            ticker = yf.Ticker(symbol)
+            fast_info = safe_dict(getattr(ticker, "fast_info", None))
+            history_meta = safe_dict(getattr(ticker, "history_metadata", None))
+
+            if fast:
+                info: dict[str, Any] = {}
+                isin: str | None = None
+            else:
+                info = safe_dict(getattr(ticker, "info", None))
+                isin = safe_isin(ticker)
+
+            return build_ticker_metadata(
+                symbol=symbol.upper(),
+                provider=self.name,
+                fast_info=fast_info,
+                history_meta=history_meta,
+                info=info,
+                isin=isin,
+                is_fast=fast,
+            )
+
+        return self._retry_fetch(do_fetch, symbol)
+
+    def fetch_classification(self, symbol: str) -> Classification:
+        """Look up sector + industry profiles for a ticker via ``yf.Sector`` / ``yf.Industry``.
+
+        Two step lookup: ``ticker.info`` gives the sector/industry *keys*
+        (slugs); those keys feed ``yf.Sector(key)`` and ``yf.Industry(key)`` to
+        fetch constituent data (top companies, representative ETFs, ...). Either
+        profile is ``None`` if the key is missing on the ticker (e.g. ETFs,
+        crypto).
+        """
+
+        def do_fetch() -> Classification:
+            info = safe_dict(getattr(yf.Ticker(symbol), "info", None))
+            sector_key = first_present(info, "sectorKey")
+            industry_key = first_present(info, "industryKey")
+
+            # Sector and industry lookups are independent upstream calls; run
+            # them concurrently to halve wall-clock when both keys are present.
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                sector_future = (
+                    pool.submit(fetch_sector_profile, sector_key) if sector_key else None
+                )
+                industry_future = (
+                    pool.submit(fetch_industry_profile, industry_key) if industry_key else None
+                )
+                sector = sector_future.result() if sector_future else None
+                industry = industry_future.result() if industry_future else None
+
+            return Classification(
+                symbol=symbol.upper(),
+                sector=sector,
+                industry=industry,
+                provider=self.name,
+                fetched_at=datetime.now(tz=UTC).isoformat(timespec="seconds"),
+            )
+
+        return self._retry_fetch(do_fetch, symbol)
+
     def _retry_fetch(
         self,
-        fetch_fn: Callable[[], pl.LazyFrame],
+        fetch_fn: Callable[[], _T],
         symbol: str,
-    ) -> pl.LazyFrame:
+    ) -> _T:
         """Retry fetch_fn on transient errors with exponential backoff. ValueError propagates."""
         last_exc: Exception = RuntimeError("unreachable")
         for attempt in range(1, _MAX_RETRIES + 1):

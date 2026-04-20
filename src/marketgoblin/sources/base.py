@@ -8,7 +8,9 @@ from typing import Any
 
 import polars as pl
 
+from marketgoblin.classification import Classification
 from marketgoblin.datasets import Dataset
+from marketgoblin.ticker_metadata import TickerMetadata
 
 # Each fetcher receives (symbol, start, end) and returns a normalized LazyFrame.
 # OHLCV fetchers return a tidy stacked frame with an `is_adjusted` bool column
@@ -50,3 +52,15 @@ class BaseSource(ABC):
                 f"Source '{self.name}' does not support dataset '{dataset}'. Supported: {supported}"
             )
         return handler(symbol, start, end)
+
+    def fetch_metadata(self, symbol: str, *, fast: bool = False) -> TickerMetadata:
+        """Return a TickerMetadata snapshot. Override per-source.
+
+        Metadata is point-in-time and not a time series, so it sits outside the
+        Dataset dispatch table.
+        """
+        raise NotImplementedError(f"Source '{self.name}' does not support metadata fetching.")
+
+    def fetch_classification(self, symbol: str) -> Classification:
+        """Return sector + industry classification for a ticker. Override per-source."""
+        raise NotImplementedError(f"Source '{self.name}' does not support classification fetching.")

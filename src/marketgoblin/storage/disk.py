@@ -3,6 +3,7 @@
 # filtered to the requested date range. OHLCV is stored as a tidy stacked
 # frame (adjusted + raw coexist, distinguished by is_adjusted column).
 
+import json
 import logging
 import os
 from pathlib import Path
@@ -15,7 +16,9 @@ from marketgoblin._metadata import build_ohlcv as _build_ohlcv_metadata
 from marketgoblin._metadata import build_shares as _build_shares_metadata
 from marketgoblin._metadata import write as _write_metadata
 from marketgoblin._normalize import parse_dates as _parse_dates
+from marketgoblin.classification import Classification
 from marketgoblin.datasets import Dataset
+from marketgoblin.ticker_metadata import TickerMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +61,7 @@ class DiskStorage:
             path.parent.mkdir(parents=True, exist_ok=True)
             self._atomic_write(chunk, path)
             meta = self._build_metadata(chunk, provider, symbol, dataset, ym, path.stat().st_size)
-            _write_metadata(meta, path)
+            _write_metadata(meta, path.with_suffix(".json"))
             logger.info(
                 "slice saved | %s rows=%d size=%db",
                 path.name,
@@ -95,6 +98,45 @@ class DiskStorage:
         lf = pl.scan_parquet(pattern).filter(pl.col("date").is_between(start_int, end_int))
 
         return _parse_dates(lf) if parse_dates else lf
+
+    def save_metadata(self, provider: str, metadata: TickerMetadata) -> None:
+        """Atomically write TickerMetadata as a JSON file.
+
+        Layout: ``{base_path}/{provider}/metadata/{SYMBOL}.json``. Metadata is
+        point-in-time (no date axis), so it sits outside the monthly-slice scheme.
+        """
+        path = self._metadata_path(provider, metadata.symbol)
+        _write_metadata(metadata.to_dict(), path)
+        logger.info("metadata saved | %s", path.name)
+
+    def load_metadata(self, provider: str, symbol: str) -> TickerMetadata:
+        """Read a saved TickerMetadata from disk. Raises if missing."""
+        path = self._metadata_path(provider, symbol)
+        if not path.exists():
+            raise FileNotFoundError(f"No metadata found for {symbol.upper()} at {path}")
+        return TickerMetadata.from_dict(json.loads(path.read_text()))
+
+    def _metadata_path(self, provider: str, symbol: str) -> Path:
+        return self.base_path / provider / "metadata" / f"{symbol.upper()}.json"
+
+    def save_classification(self, provider: str, classification: Classification) -> None:
+        """Atomically write a Classification as JSON.
+
+        Layout: ``{base_path}/{provider}/classification/{SYMBOL}.json``.
+        """
+        path = self._classification_path(provider, classification.symbol)
+        _write_metadata(classification.to_dict(), path)
+        logger.info("classification saved | %s", path.name)
+
+    def load_classification(self, provider: str, symbol: str) -> Classification:
+        """Read a saved Classification from disk. Raises if missing."""
+        path = self._classification_path(provider, symbol)
+        if not path.exists():
+            raise FileNotFoundError(f"No classification found for {symbol.upper()} at {path}")
+        return Classification.from_dict(json.loads(path.read_text()))
+
+    def _classification_path(self, provider: str, symbol: str) -> Path:
+        return self.base_path / provider / "classification" / f"{symbol.upper()}.json"
 
     def _symbol_dir(self, provider: str, symbol: str, dataset: Dataset) -> Path:
         return self.base_path / provider / dataset / symbol
