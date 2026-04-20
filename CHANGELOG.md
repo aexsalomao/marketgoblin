@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-04-20
+
 ### Added
 - `Dataset` enum (`OHLCV`, `SHARES`, `DIVIDENDS`) exported from the package root for dataset selection
 - Shares-outstanding dataset via Yahoo (`yfinance.Ticker.get_shares_full`) — sparse, corporate-action-driven series deduplicated to one row per day
