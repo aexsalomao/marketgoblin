@@ -1,0 +1,45 @@
+/* ============================================================
+   Homepage hero — install block
+   ============================================================ */
+.md-content [align="center"] .highlight {
+  display: inline-block;
+}
+
+.md-content [align="center"] .highlight pre {
+  font-size: 1.05rem;
+  padding: 0.75rem 2.5rem;
+  border-radius: 0.5rem;
+}
+
+/* Badge row spacing */
+.md-content [align="center"] p > a {
+  display: inline-block;
+  margin: 0.15rem 0.1rem;
+}
+
+/* ============================================================
+   Feature grid cards
+   ============================================================ */
+.md-typeset .grid.cards > ul > li {
+  border-left: 3px solid var(--md-primary-fg-color);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.md-typeset .grid.cards > ul > li:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+
+/* ============================================================
+   CTA buttons
+   ============================================================ */
+.md-typeset [align="center"] .md-button {
+  margin: 0.3rem;
+}
+
+/* ============================================================
+   API reference — tighten parameter tables
+   ============================================================ */
+.md-typeset table:not([class]) th {
+  white-space: nowrap;
+}
