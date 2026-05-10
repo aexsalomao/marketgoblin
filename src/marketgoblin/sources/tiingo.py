@@ -17,6 +17,7 @@ from marketgoblin._normalize import (
     normalize_dividends,
     normalize_ohlcv,
     normalize_shares,
+    normalize_splits,
 )
 from marketgoblin.classification import Classification
 from marketgoblin.datasets import Dataset
@@ -28,6 +29,7 @@ from marketgoblin.sources._tiingo_parsing import (
     fetch_latest_close,
     fetch_latest_fundamentals,
     prices_rows_to_dividends,
+    prices_rows_to_splits,
     prices_rows_to_stacked_ohlcv,
 )
 from marketgoblin.sources.base import BaseSource, Fetcher
@@ -80,6 +82,7 @@ class TiingoSource(BaseSource):
             Dataset.OHLCV: self._fetch_ohlcv,
             Dataset.SHARES: self._fetch_shares,
             Dataset.DIVIDENDS: self._fetch_dividends,
+            Dataset.SPLITS: self._fetch_splits,
         }
 
     def _fetch_ohlcv(self, symbol: str, start: str, end: str) -> pl.LazyFrame:
@@ -123,6 +126,26 @@ class TiingoSource(BaseSource):
             return (
                 prices_rows_to_dividends(rows, symbol)
                 .pipe(normalize_dividends)
+                .filter(pl.col("date").is_between(start_int, end_int))
+            )
+
+        return self._retry_fetch(do_fetch, symbol)
+
+    def _fetch_splits(self, symbol: str, start: str, end: str) -> pl.LazyFrame:
+        start_int = int(start.replace("-", ""))
+        end_int = int(end.replace("-", ""))
+
+        def do_fetch() -> pl.LazyFrame:
+            rows = self._client.get_ticker_price(
+                symbol.lower(),
+                startDate=start,
+                endDate=end,
+                fmt="json",
+                frequency="daily",
+            )
+            return (
+                prices_rows_to_splits(rows, symbol)
+                .pipe(normalize_splits)
                 .filter(pl.col("date").is_between(start_int, end_int))
             )
 

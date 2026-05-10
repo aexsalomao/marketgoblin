@@ -156,6 +156,45 @@ def build_dividends(
     }
 
 
+def build_splits(
+    chunk: pl.DataFrame,
+    provider: str,
+    symbol: str,
+    ym: str,
+    file_size_bytes: int,
+) -> dict[str, Any]:
+    """Build a metadata dict for a saved splits parquet slice.
+
+    Splits are event-driven (rare — typically zero or one per ticker per
+    decade), so no missing-days analysis applies. ``split_factor`` carries
+    the per-event multiplier; min/max bound the slice for sanity-checking
+    against known corporate actions.
+    """
+    stats = chunk.select(
+        [
+            pl.col("date").min().alias("start_date"),
+            pl.col("date").max().alias("end_date"),
+            pl.len().alias("row_count"),
+            pl.col("split_factor").min().alias("split_factor_min"),
+            pl.col("split_factor").max().alias("split_factor_max"),
+        ]
+    ).row(0, named=True)
+
+    return {
+        "symbol": symbol,
+        "provider": provider,
+        "year_month": ym,
+        "row_count": stats["row_count"],
+        "start_date": stats["start_date"],
+        "end_date": stats["end_date"],
+        "columns": chunk.columns,
+        "downloaded_at": datetime.now().isoformat(timespec="seconds"),
+        "file_size_bytes": file_size_bytes,
+        "split_factor_min": float(stats["split_factor_min"]),
+        "split_factor_max": float(stats["split_factor_max"]),
+    }
+
+
 def write(data: dict[str, Any], path: Path) -> None:
     """Atomically write a dict as JSON at ``path``. Creates parent dirs if needed.
 

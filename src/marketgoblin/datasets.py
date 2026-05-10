@@ -10,3 +10,4 @@ class Dataset(StrEnum):
     OHLCV = "ohlcv"
     SHARES = "shares"
     DIVIDENDS = "dividends"
+    SPLITS = "splits"

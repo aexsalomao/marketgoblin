@@ -45,6 +45,19 @@ def normalize_dividends(lf: pl.LazyFrame) -> pl.LazyFrame:
     )
 
 
+def normalize_splits(lf: pl.LazyFrame) -> pl.LazyFrame:
+    """Cast split_factor to float32 and date to int32 YYYYMMDD.
+
+    ``split_factor`` is the per-event multiplier (e.g. ``2.0`` for a 2-for-1
+    forward split, ``0.5`` for a 1-for-2 reverse). Float32 is sufficient —
+    the factor is always a small, exactly-representable rational.
+    """
+    return lf.with_columns(
+        pl.col("split_factor").cast(pl.Float32),
+        pl.col("date").dt.strftime("%Y%m%d").cast(pl.Int32),
+    )
+
+
 def parse_dates(lf: pl.LazyFrame) -> pl.LazyFrame:
     """Convert int32 YYYYMMDD date back to pl.Date for in-memory use."""
     return lf.with_columns(pl.col("date").cast(pl.String).str.to_date("%Y%m%d"))

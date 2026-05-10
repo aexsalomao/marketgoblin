@@ -6,6 +6,7 @@ from marketgoblin._normalize import (
     normalize_dividends,
     normalize_ohlcv,
     normalize_shares,
+    normalize_splits,
     parse_dates,
 )
 
@@ -87,6 +88,33 @@ def test_normalize_shares_date_format():
 def test_normalize_shares_preserves_large_counts():
     df = normalize_shares(make_raw_shares()).collect()
     assert df["shares"][0] == 15_000_000_000
+
+
+def make_raw_splits() -> pl.LazyFrame:
+    return pl.DataFrame(
+        {
+            "date": [date(2020, 8, 31), date(2014, 6, 9)],
+            "split_factor": pl.Series([4.0, 7.0], dtype=pl.Float64),
+            "symbol": ["AAPL", "AAPL"],
+        }
+    ).lazy()
+
+
+def test_normalize_splits_dtypes():
+    df = normalize_splits(make_raw_splits()).collect()
+    assert df.schema["split_factor"] == pl.Float32
+    assert df.schema["date"] == pl.Int32
+
+
+def test_normalize_splits_date_format():
+    df = normalize_splits(make_raw_splits()).collect()
+    assert df["date"].to_list() == [20200831, 20140609]
+
+
+def test_parse_dates_works_for_splits():
+    df = parse_dates(normalize_splits(make_raw_splits())).collect()
+    assert df.schema["date"] == pl.Date
+    assert df["date"][0] == date(2020, 8, 31)
 
 
 def test_normalize_dividends_dtypes():

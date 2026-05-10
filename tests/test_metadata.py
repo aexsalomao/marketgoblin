@@ -3,7 +3,7 @@ import json
 import polars as pl
 import pytest
 
-from marketgoblin._metadata import build_dividends, build_ohlcv, build_shares, write
+from marketgoblin._metadata import build_dividends, build_ohlcv, build_shares, build_splits, write
 
 
 def make_ohlcv_chunk() -> pl.DataFrame:
@@ -40,6 +40,16 @@ def make_dividends_chunk() -> pl.DataFrame:
         {
             "date": pl.Series([20240209], dtype=pl.Int32),
             "dividend": pl.Series([0.24], dtype=pl.Float32),
+            "symbol": ["AAPL"],
+        }
+    )
+
+
+def make_splits_chunk() -> pl.DataFrame:
+    return pl.DataFrame(
+        {
+            "date": pl.Series([20200831], dtype=pl.Int32),
+            "split_factor": pl.Series([4.0], dtype=pl.Float32),
             "symbol": ["AAPL"],
         }
     )
@@ -213,3 +223,38 @@ def test_build_dividends_stats(fake_pq):
     assert meta["start_date"] == 20240209
     assert meta["end_date"] == 20240209
     assert meta["dividend_total"] == pytest.approx(0.24, rel=1e-3)
+
+
+def test_build_splits_has_all_keys(fake_pq):
+    meta = build_splits(make_splits_chunk(), "tiingo", "AAPL", "2020-08", 0)
+    expected = {
+        "symbol",
+        "provider",
+        "year_month",
+        "row_count",
+        "start_date",
+        "end_date",
+        "columns",
+        "downloaded_at",
+        "file_size_bytes",
+        "split_factor_min",
+        "split_factor_max",
+    }
+    assert set(meta.keys()) == expected
+
+
+def test_build_splits_stats(fake_pq):
+    meta = build_splits(make_splits_chunk(), "tiingo", "AAPL", "2020-08", 0)
+    assert meta["symbol"] == "AAPL"
+    assert meta["row_count"] == 1
+    assert meta["start_date"] == 20200831
+    assert meta["end_date"] == 20200831
+    assert meta["split_factor_min"] == pytest.approx(4.0, rel=1e-3)
+    assert meta["split_factor_max"] == pytest.approx(4.0, rel=1e-3)
+
+
+def test_build_splits_omits_ohlcv_only_keys(fake_pq):
+    meta = build_splits(make_splits_chunk(), "tiingo", "AAPL", "2020-08", 0)
+    assert "missing_days" not in meta
+    assert "expected_trading_days" not in meta
+    assert "has_adjusted" not in meta

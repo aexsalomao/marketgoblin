@@ -46,6 +46,16 @@ def make_dividends_lf() -> pl.LazyFrame:
     ).lazy()
 
 
+def make_splits_lf() -> pl.LazyFrame:
+    return pl.DataFrame(
+        {
+            "date": pl.Series([20200831], dtype=pl.Int32),
+            "split_factor": pl.Series([4.0], dtype=pl.Float32),
+            "symbol": ["AAPL"],
+        }
+    ).lazy()
+
+
 @pytest.fixture
 def storage(tmp_path) -> DiskStorage:
     return DiskStorage(tmp_path)
@@ -199,3 +209,36 @@ def test_save_lowercase_symbol_loadable_as_uppercase(storage, tmp_path):
     df = storage.load("yahoo", "AAPL", Dataset.OHLCV, "2024-01-01", "2024-12-31").collect()
     assert len(df) == 8
     assert (tmp_path / "yahoo" / "ohlcv" / "AAPL").exists()
+
+
+def test_save_splits_creates_pq_files(storage, tmp_path):
+    storage.save("tiingo", "AAPL", Dataset.SPLITS, make_splits_lf())
+    assert (tmp_path / "tiingo" / "splits" / "AAPL" / "AAPL_2020-08.pq").exists()
+
+
+def test_save_splits_creates_sidecars(storage, tmp_path):
+    storage.save("tiingo", "AAPL", Dataset.SPLITS, make_splits_lf())
+    sidecar = tmp_path / "tiingo" / "splits" / "AAPL" / "AAPL_2020-08.json"
+    assert sidecar.exists()
+
+
+def test_load_splits_row_count(storage):
+    storage.save("tiingo", "AAPL", Dataset.SPLITS, make_splits_lf())
+    df = storage.load("tiingo", "AAPL", Dataset.SPLITS, "2020-01-01", "2020-12-31").collect()
+    assert len(df) == 1
+
+
+def test_load_splits_schema(storage):
+    storage.save("tiingo", "AAPL", Dataset.SPLITS, make_splits_lf())
+    df = storage.load("tiingo", "AAPL", Dataset.SPLITS, "2020-01-01", "2020-12-31").collect()
+    assert df.schema["date"] == pl.Int32
+    assert df.schema["split_factor"] == pl.Float32
+
+
+def test_load_splits_parse_dates(storage):
+    storage.save("tiingo", "AAPL", Dataset.SPLITS, make_splits_lf())
+    df = storage.load(
+        "tiingo", "AAPL", Dataset.SPLITS, "2020-01-01", "2020-12-31", parse_dates=True
+    ).collect()
+    assert df.schema["date"] == pl.Date
+    assert df["date"][0] == date(2020, 8, 31)

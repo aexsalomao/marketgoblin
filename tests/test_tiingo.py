@@ -21,6 +21,7 @@ from marketgoblin.sources._tiingo_parsing import (
     fetch_latest_fundamentals,
     prices_rows_to_base_lf,
     prices_rows_to_dividends,
+    prices_rows_to_splits,
     prices_rows_to_stacked_ohlcv,
     slugify,
     stack_ohlcv,
@@ -62,6 +63,42 @@ def _make_prices_rows() -> list[dict[str, Any]]:
             "adjVolume": 75_000_000,
             "divCash": 0.24,
             "splitFactor": 1.0,
+        },
+    ]
+
+
+def _make_prices_rows_with_split() -> list[dict[str, Any]]:
+    """Two trading days, the second carrying a 4-for-1 split."""
+    return [
+        {
+            "date": "2020-08-28T00:00:00.000Z",
+            "open": 500.0,
+            "high": 510.0,
+            "low": 495.0,
+            "close": 506.0,
+            "volume": 50_000_000,
+            "adjOpen": 125.0,
+            "adjHigh": 127.5,
+            "adjLow": 123.75,
+            "adjClose": 126.5,
+            "adjVolume": 200_000_000,
+            "divCash": 0.0,
+            "splitFactor": 1.0,
+        },
+        {
+            "date": "2020-08-31T00:00:00.000Z",
+            "open": 127.0,
+            "high": 130.0,
+            "low": 126.0,
+            "close": 129.0,
+            "volume": 200_000_000,
+            "adjOpen": 127.0,
+            "adjHigh": 130.0,
+            "adjLow": 126.0,
+            "adjClose": 129.0,
+            "adjVolume": 200_000_000,
+            "divCash": 0.0,
+            "splitFactor": 4.0,
         },
     ]
 
@@ -169,6 +206,25 @@ def test_prices_rows_to_dividends_filters_zero_divcash():
     # Only the second row has divCash > 0
     assert df.height == 1
     assert df["dividend"].to_list() == [0.24]
+
+
+def test_prices_rows_to_splits_filters_unit_split_factor():
+    # No split events in the standard fixture (both rows have splitFactor == 1.0)
+    df = prices_rows_to_splits(_make_prices_rows(), "AAPL").collect()
+    assert df.height == 0
+
+
+def test_prices_rows_to_splits_extracts_split_event():
+    df = prices_rows_to_splits(_make_prices_rows_with_split(), "AAPL").collect()
+    assert df.height == 1
+    assert df["date"].to_list() == [date(2020, 8, 31)]
+    assert df["split_factor"].to_list() == [4.0]
+    assert df["symbol"].to_list() == ["AAPL"]
+
+
+def test_prices_rows_to_splits_raises_on_empty():
+    with pytest.raises(ValueError, match="No OHLCV data"):
+        prices_rows_to_splits([], "AAPL")
 
 
 def test_derive_shares_from_marketcap_divides_marketcap_by_close():
@@ -359,7 +415,7 @@ def test_init_explicit_api_key_takes_precedence_over_env(monkeypatch):
 
 def test_supported_datasets(source):
     assert source.supported_datasets == frozenset(
-        {Dataset.OHLCV, Dataset.SHARES, Dataset.DIVIDENDS}
+        {Dataset.OHLCV, Dataset.SHARES, Dataset.DIVIDENDS, Dataset.SPLITS}
     )
 
 
@@ -483,6 +539,40 @@ def test_fetch_dividends_filters_date_range(source):
     with patch.object(source._client, "get_ticker_price", return_value=_make_prices_rows()):
         df = source.fetch(Dataset.DIVIDENDS, "AAPL", "2024-01-04", "2024-01-31").collect()
     # The single divCash row falls on 2024-01-03, outside [2024-01-04, 2024-01-31]
+    assert df.height == 0
+
+
+def test_fetch_splits_lowercases_symbol_for_api(source):
+    with patch.object(
+        source._client, "get_ticker_price", return_value=_make_prices_rows_with_split()
+    ) as mock:
+        source.fetch(Dataset.SPLITS, "AAPL", "2020-08-01", "2020-09-30").collect()
+    assert mock.call_args.args[0] == "aapl"
+
+
+def test_fetch_splits_returns_normalized_frame(source):
+    with patch.object(
+        source._client, "get_ticker_price", return_value=_make_prices_rows_with_split()
+    ):
+        df = source.fetch(Dataset.SPLITS, "AAPL", "2020-08-01", "2020-09-30").collect()
+    assert df.schema["date"] == pl.Int32
+    assert df.schema["split_factor"] == pl.Float32
+    assert df["date"].to_list() == [20200831]
+    assert df["split_factor"].to_list() == [pytest.approx(4.0)]
+
+
+def test_fetch_splits_filters_date_range(source):
+    with patch.object(
+        source._client, "get_ticker_price", return_value=_make_prices_rows_with_split()
+    ):
+        df = source.fetch(Dataset.SPLITS, "AAPL", "2020-09-01", "2020-09-30").collect()
+    # The split event falls on 2020-08-31, outside [2020-09-01, 2020-09-30]
+    assert df.height == 0
+
+
+def test_fetch_splits_returns_empty_when_no_splits_in_window(source):
+    with patch.object(source._client, "get_ticker_price", return_value=_make_prices_rows()):
+        df = source.fetch(Dataset.SPLITS, "AAPL", "2024-01-01", "2024-01-31").collect()
     assert df.height == 0
 
 

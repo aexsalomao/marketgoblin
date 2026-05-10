@@ -14,6 +14,7 @@ import polars as pl
 from marketgoblin._metadata import build_dividends as _build_dividends_metadata
 from marketgoblin._metadata import build_ohlcv as _build_ohlcv_metadata
 from marketgoblin._metadata import build_shares as _build_shares_metadata
+from marketgoblin._metadata import build_splits as _build_splits_metadata
 from marketgoblin._metadata import write as _write_metadata
 from marketgoblin._normalize import parse_dates as _parse_dates
 from marketgoblin.classification import Classification
@@ -157,6 +158,8 @@ class DiskStorage:
             return _build_ohlcv_metadata(chunk, provider, symbol, ym, file_size_bytes)
         if dataset == Dataset.DIVIDENDS:
             return _build_dividends_metadata(chunk, provider, symbol, ym, file_size_bytes)
+        if dataset == Dataset.SPLITS:
+            return _build_splits_metadata(chunk, provider, symbol, ym, file_size_bytes)
         return _build_shares_metadata(chunk, provider, symbol, ym, file_size_bytes)
 
     def _atomic_write(self, df: pl.DataFrame, path: Path) -> None:

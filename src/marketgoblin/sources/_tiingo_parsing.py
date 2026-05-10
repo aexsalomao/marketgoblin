@@ -143,6 +143,20 @@ def prices_rows_to_dividends(rows: list[dict[str, Any]], symbol: str) -> pl.Lazy
     )
 
 
+def prices_rows_to_splits(rows: list[dict[str, Any]], symbol: str) -> pl.LazyFrame:
+    """Extract split events (``splitFactor != 1.0``) from the prices payload.
+
+    Tiingo emits ``splitFactor`` on every prices row; non-event days carry
+    ``1.0``. The output frame is event-only — one row per actual split.
+    """
+    base = prices_rows_to_base_lf(rows, symbol)
+    return base.filter(pl.col("splitFactor") != 1.0).select(
+        "date",
+        pl.col("splitFactor").alias("split_factor"),
+        "symbol",
+    )
+
+
 def derive_shares_from_marketcap(
     prices_rows: list[dict[str, Any]],
     fundamentals_rows: list[dict[str, Any]],

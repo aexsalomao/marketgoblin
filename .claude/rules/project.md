@@ -1,7 +1,7 @@
 # marketgoblin
 
 Market data platform for downloading, storing, and snapshotting financial data.
-Supports multiple datasets (OHLCV, shares-outstanding, dividends, ...) via a
+Supports multiple datasets (OHLCV, shares-outstanding, dividends, splits, ...) via a
 per-source dispatch layer.
 
 - **Python:** 3.13 | **Build:** uv_build | **License:** MIT
@@ -34,10 +34,10 @@ pytest --cov=marketgoblin  # with coverage
 ```
 src/marketgoblin/
     __init__.py           # exports MarketGoblin, Dataset; __version__
-    datasets.py           # Dataset StrEnum (OHLCV, SHARES, DIVIDENDS, ...)
+    datasets.py           # Dataset StrEnum (OHLCV, SHARES, DIVIDENDS, SPLITS, ...)
     goblin.py             # MarketGoblin — public API facade
-    _normalize.py         # normalize_ohlcv, normalize_shares, normalize_dividends, parse_dates — pure
-    _metadata.py          # build_ohlcv, build_shares, build_dividends, write — pure
+    _normalize.py         # normalize_ohlcv, normalize_shares, normalize_dividends, normalize_splits, parse_dates — pure
+    _metadata.py          # build_ohlcv, build_shares, build_dividends, build_splits, write — pure
     sources/
         base.py           # BaseSource ABC + Fetcher type alias
         yahoo.py          # YahooSource — OHLCV + SHARES + DIVIDENDS via yfinance
@@ -69,6 +69,7 @@ class Dataset(StrEnum):
     OHLCV = "ohlcv"
     SHARES = "shares"
     DIVIDENDS = "dividends"
+    SPLITS = "splits"
 ```
 
 `StrEnum` so members serialize directly to path segments and JSON. Public API
@@ -109,6 +110,7 @@ _OHLC_COLS = ["open", "high", "low", "close"]
 def normalize_ohlcv(lf)     -> pl.LazyFrame   # → float32 OHLC, int64 volume, bool is_adjusted, int32 YYYYMMDD date
 def normalize_shares(lf)    -> pl.LazyFrame   # → int64 shares, int32 YYYYMMDD date
 def normalize_dividends(lf) -> pl.LazyFrame   # → float32 dividend, int32 YYYYMMDD date
+def normalize_splits(lf)    -> pl.LazyFrame   # → float32 split_factor, int32 YYYYMMDD date
 def parse_dates(lf)         -> pl.LazyFrame   # → int32 YYYYMMDD → pl.Date
 ```
 
@@ -120,12 +122,14 @@ Each `normalize_*` is dataset-specific. `parse_dates` works on any frame with an
 def build_ohlcv(chunk, provider, symbol, ym, file_size_bytes, currency="USD") -> dict
 def build_shares(chunk, provider, symbol, ym, file_size_bytes) -> dict
 def build_dividends(chunk, provider, symbol, ym, file_size_bytes, currency="USD") -> dict
+def build_splits(chunk, provider, symbol, ym, file_size_bytes) -> dict
 def write(metadata, path) -> None  # atomic via .tmp rename
 ```
 
 `build_ohlcv()` computes row_count + unique_days (stacked OHLCV has 2 rows per date), date range, close/volume min/max, expected vs. missing trading days (weekday-based, computed on unique dates), and `has_adjusted`/`has_raw` flags describing which variants are present in the slice.
 `build_shares()` computes row_count, date range, shares min/max — no missing-days analysis (shares cadence is irregular).
 `build_dividends()` computes row_count, date range, dividend min/max/total — no missing-days analysis (dividends are event-driven).
+`build_splits()` computes row_count, date range, split_factor min/max — no missing-days analysis (splits are event-driven and rare).
 All take `file_size_bytes: int` (caller reads `path.stat().st_size` after the atomic write).
 
 ### `sources/base.py` — `BaseSource`
@@ -172,6 +176,7 @@ class TiingoSource(BaseSource):
     def _fetch_ohlcv(self, symbol, start, end) -> pl.LazyFrame
     def _fetch_shares(self, symbol, start, end) -> pl.LazyFrame
     def _fetch_dividends(self, symbol, start, end) -> pl.LazyFrame
+    def _fetch_splits(self, symbol, start, end) -> pl.LazyFrame
     def fetch_metadata(self, symbol, *, fast=False) -> TickerMetadata
     def fetch_classification(self, symbol) -> Classification
     def _retry_fetch(self, fetch_fn, symbol) -> pl.LazyFrame
@@ -180,6 +185,7 @@ class TiingoSource(BaseSource):
 - OHLCV: one `client.get_ticker_price(symbol, startDate, endDate, fmt="json", frequency="daily")` call returns each trading day's raw OHLCV plus adjusted variants (`adjOpen`, `adjHigh`, `adjLow`, `adjClose`, `adjVolume`) and `divCash` / `splitFactor`. The two variants are split into the project's stacked tidy frame, sorted by `(date, is_adjusted)`.
 - Shares: Tiingo's daily Fundamentals endpoint has `marketCap` but no shares field. We join `client.get_ticker_price(...)` + `client.get_fundamentals_daily(...)` on date and derive `shares = round(marketCap / close)` per day.
 - Dividends: derived from the same prices endpoint as OHLCV — rows with `divCash > 0`.
+- Splits: derived from the same prices endpoint as OHLCV — rows with `splitFactor != 1.0`.
 - `fetch_metadata`: merges `client.get_ticker_metadata` + latest row from `client.get_fundamentals_daily` (`marketCap`, `peRatio`) + latest close via `client.get_ticker_price` (used to derive `shares_outstanding`). `fast=True` skips both paid lookups.
 - `fetch_classification`: direct `requests.get` against `/tiingo/fundamentals/meta` (paid; not wrapped by the Python client). Sector / industry strings → slugified `SectorProfile` / `IndustryProfile` keys; constituent fields stay at dataclass defaults.
 - All Tiingo REST calls send the symbol lowercase; on-disk `symbol` columns are uppercase.
