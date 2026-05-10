@@ -19,12 +19,14 @@ from marketgoblin.sources._tiingo_parsing import (
     fetch_fundamentals_meta,
     fetch_latest_close,
     fetch_latest_fundamentals,
+    fundamentals_daily_rows_to_lf,
     prices_rows_to_base_lf,
     prices_rows_to_dividends,
     prices_rows_to_splits,
     prices_rows_to_stacked_ohlcv,
     slugify,
     stack_ohlcv,
+    statements_rows_to_lf,
 )
 from marketgoblin.sources.tiingo import TiingoSource
 from marketgoblin.ticker_metadata import TickerMetadata
@@ -99,6 +101,38 @@ def _make_prices_rows_with_split() -> list[dict[str, Any]]:
             "adjVolume": 200_000_000,
             "divCash": 0.0,
             "splitFactor": 4.0,
+        },
+    ]
+
+
+def _make_statements_rows() -> list[dict[str, Any]]:
+    """Two quarterly Tiingo statements payloads. Income-statement section is a
+    list of {dataCode, value} pairs; missing codes simulate the real wire shape.
+    """
+    return [
+        {
+            "date": "2024-08-01T00:00:00.000Z",
+            "year": 2024,
+            "quarter": 3,
+            "statementData": {
+                "incomeStatement": [
+                    {"dataCode": "epsDil", "value": 1.40},
+                    {"dataCode": "epsBasic", "value": 1.41},
+                    {"dataCode": "revenue", "value": 85_777_000_000},
+                ],
+            },
+        },
+        {
+            "date": "2024-05-02T00:00:00.000Z",
+            "year": 2024,
+            "quarter": 2,
+            "statementData": {
+                "incomeStatement": [
+                    {"dataCode": "epsDil", "value": 1.53},
+                    {"dataCode": "epsBasic", "value": 1.54},
+                    {"dataCode": "revenue", "value": 90_753_000_000},
+                ],
+            },
         },
     ]
 
@@ -225,6 +259,88 @@ def test_prices_rows_to_splits_extracts_split_event():
 def test_prices_rows_to_splits_raises_on_empty():
     with pytest.raises(ValueError, match="No OHLCV data"):
         prices_rows_to_splits([], "AAPL")
+
+
+def test_fundamentals_daily_rows_to_lf_dtypes_and_renames():
+    lf = fundamentals_daily_rows_to_lf(_make_fundamentals_rows(), "AAPL")
+    df = lf.collect()
+    assert df.schema["date"] == pl.Date
+    assert set(df.columns) == {
+        "date",
+        "market_cap",
+        "enterprise_val",
+        "pe_ratio",
+        "pb_ratio",
+        "trailing_peg_1y",
+        "symbol",
+    }
+    assert df["market_cap"].to_list() == [1_500_000_000_000, 1_650_000_000_000]
+    assert df["symbol"].to_list() == ["AAPL", "AAPL"]
+
+
+def test_fundamentals_daily_rows_to_lf_handles_missing_metric_fields():
+    rows = [
+        # Tiingo occasionally omits ratios for tickers without earnings.
+        {"date": "2024-01-02T00:00:00.000Z", "marketCap": 1_500_000_000_000},
+        {"date": "2024-01-03T00:00:00.000Z", "marketCap": 1_650_000_000_000, "peRatio": 32.6},
+    ]
+    df = fundamentals_daily_rows_to_lf(rows, "AAPL").collect()
+    assert df.height == 2
+    assert df["pe_ratio"].to_list() == [None, pytest.approx(32.6)]
+    assert df["pb_ratio"].to_list() == [None, None]
+
+
+def test_fundamentals_daily_rows_to_lf_raises_on_empty():
+    with pytest.raises(ValueError, match="No fundamentals data"):
+        fundamentals_daily_rows_to_lf([], "AAPL")
+
+
+def test_statements_rows_to_lf_extracts_income_codes():
+    df = statements_rows_to_lf(_make_statements_rows(), "AAPL").collect()
+    assert df.height == 2
+    assert df.schema["date"] == pl.Date
+    assert sorted(df["fiscal_year"].to_list()) == [2024, 2024]
+    assert sorted(df["fiscal_quarter"].to_list()) == [2, 3]
+    by_quarter = {row["fiscal_quarter"]: row for row in df.iter_rows(named=True)}
+    assert by_quarter[3]["eps_diluted"] == pytest.approx(1.40)
+    assert by_quarter[3]["eps_basic"] == pytest.approx(1.41)
+    assert by_quarter[3]["revenue"] == 85_777_000_000.0
+    assert by_quarter[3]["symbol"] == "AAPL"
+
+
+def test_statements_rows_to_lf_handles_missing_income_codes():
+    rows = [
+        {
+            "date": "2024-08-01T00:00:00.000Z",
+            "year": 2024,
+            "quarter": 3,
+            "statementData": {
+                "incomeStatement": [{"dataCode": "epsDil", "value": 1.40}],
+            },
+        },
+    ]
+    df = statements_rows_to_lf(rows, "AAPL").collect()
+    assert df.height == 1
+    assert df["eps_diluted"].to_list() == [pytest.approx(1.40)]
+    assert df["eps_basic"].to_list() == [None]
+    assert df["revenue"].to_list() == [None]
+
+
+def test_statements_rows_to_lf_handles_missing_statement_data():
+    rows = [{"date": "2024-08-01T00:00:00.000Z", "year": 2024, "quarter": 3}]
+    df = statements_rows_to_lf(rows, "AAPL").collect()
+    assert df.height == 1
+    assert df["eps_diluted"].to_list() == [None]
+
+
+def test_statements_rows_to_lf_raises_on_empty():
+    with pytest.raises(ValueError, match="No statements data"):
+        statements_rows_to_lf([], "AAPL")
+
+
+def test_statements_rows_to_lf_uppercases_symbol():
+    df = statements_rows_to_lf(_make_statements_rows(), "aapl").collect()
+    assert df["symbol"].unique().to_list() == ["AAPL"]
 
 
 def test_derive_shares_from_marketcap_divides_marketcap_by_close():
@@ -413,9 +529,27 @@ def test_init_explicit_api_key_takes_precedence_over_env(monkeypatch):
     assert source.api_key == "explicit-key"
 
 
+def test_init_as_reported_defaults_true():
+    # PEAD/SUE wants point-in-time announced numbers, not later restatements.
+    source = TiingoSource(api_key="k")
+    assert source._as_reported is True
+
+
+def test_init_as_reported_can_be_disabled():
+    source = TiingoSource(api_key="k", as_reported=False)
+    assert source._as_reported is False
+
+
 def test_supported_datasets(source):
     assert source.supported_datasets == frozenset(
-        {Dataset.OHLCV, Dataset.SHARES, Dataset.DIVIDENDS, Dataset.SPLITS}
+        {
+            Dataset.OHLCV,
+            Dataset.SHARES,
+            Dataset.DIVIDENDS,
+            Dataset.SPLITS,
+            Dataset.FUNDAMENTALS_DAILY,
+            Dataset.FUNDAMENTALS_STATEMENTS,
+        }
     )
 
 
@@ -574,6 +708,103 @@ def test_fetch_splits_returns_empty_when_no_splits_in_window(source):
     with patch.object(source._client, "get_ticker_price", return_value=_make_prices_rows()):
         df = source.fetch(Dataset.SPLITS, "AAPL", "2024-01-01", "2024-01-31").collect()
     assert df.height == 0
+
+
+def test_fetch_fundamentals_daily_lowercases_symbol_for_api(source):
+    with patch.object(
+        source._client, "get_fundamentals_daily", return_value=_make_fundamentals_rows()
+    ) as mock:
+        source.fetch(Dataset.FUNDAMENTALS_DAILY, "AAPL", "2024-01-01", "2024-01-31").collect()
+    assert mock.call_args.args[0] == "aapl"
+
+
+def test_fetch_fundamentals_daily_returns_normalized_frame(source):
+    with patch.object(
+        source._client, "get_fundamentals_daily", return_value=_make_fundamentals_rows()
+    ):
+        df = source.fetch(
+            Dataset.FUNDAMENTALS_DAILY, "AAPL", "2024-01-01", "2024-01-31"
+        ).collect()
+    assert df.schema["date"] == pl.Int32
+    assert df.schema["market_cap"] == pl.Int64
+    assert df.schema["enterprise_val"] == pl.Int64
+    assert df.schema["pe_ratio"] == pl.Float32
+    assert df.schema["pb_ratio"] == pl.Float32
+    assert df.schema["trailing_peg_1y"] == pl.Float32
+    assert df["market_cap"].to_list() == [1_500_000_000_000, 1_650_000_000_000]
+
+
+def test_fetch_fundamentals_daily_uppercases_symbol_in_output(source):
+    with patch.object(
+        source._client, "get_fundamentals_daily", return_value=_make_fundamentals_rows()
+    ):
+        df = source.fetch(
+            Dataset.FUNDAMENTALS_DAILY, "aapl", "2024-01-01", "2024-01-31"
+        ).collect()
+    assert df["symbol"].unique().to_list() == ["AAPL"]
+
+
+def test_fetch_fundamentals_daily_empty_raises(source):
+    with (
+        patch.object(source._client, "get_fundamentals_daily", return_value=[]),
+        pytest.raises(ValueError, match="No fundamentals"),
+    ):
+        source.fetch(Dataset.FUNDAMENTALS_DAILY, "AAPL", "2024-01-01", "2024-01-31")
+
+
+def test_fetch_statements_lowercases_symbol_for_api(source):
+    with patch.object(
+        source._client, "get_fundamentals_statements", return_value=_make_statements_rows()
+    ) as mock:
+        source.fetch(
+            Dataset.FUNDAMENTALS_STATEMENTS, "AAPL", "2022-01-01", "2024-12-31"
+        ).collect()
+    assert mock.call_args.args[0] == "aapl"
+
+
+def test_fetch_statements_passes_as_reported_true_by_default(source):
+    with patch.object(
+        source._client, "get_fundamentals_statements", return_value=_make_statements_rows()
+    ) as mock:
+        source.fetch(
+            Dataset.FUNDAMENTALS_STATEMENTS, "AAPL", "2022-01-01", "2024-12-31"
+        ).collect()
+    assert mock.call_args.kwargs["asReported"] is True
+
+
+def test_fetch_statements_passes_as_reported_false_when_disabled():
+    source = TiingoSource(api_key="k", as_reported=False)
+    with patch.object(
+        source._client, "get_fundamentals_statements", return_value=_make_statements_rows()
+    ) as mock:
+        source.fetch(
+            Dataset.FUNDAMENTALS_STATEMENTS, "AAPL", "2022-01-01", "2024-12-31"
+        ).collect()
+    assert mock.call_args.kwargs["asReported"] is False
+
+
+def test_fetch_statements_returns_normalized_frame(source):
+    with patch.object(
+        source._client, "get_fundamentals_statements", return_value=_make_statements_rows()
+    ):
+        df = source.fetch(
+            Dataset.FUNDAMENTALS_STATEMENTS, "AAPL", "2022-01-01", "2024-12-31"
+        ).collect()
+    assert df.schema["date"] == pl.Int32
+    assert df.schema["fiscal_year"] == pl.Int16
+    assert df.schema["fiscal_quarter"] == pl.Int8
+    assert df.schema["eps_diluted"] == pl.Float32
+    assert df.schema["eps_basic"] == pl.Float32
+    assert df.schema["revenue"] == pl.Float64
+    assert df.height == 2
+
+
+def test_fetch_statements_empty_raises(source):
+    with (
+        patch.object(source._client, "get_fundamentals_statements", return_value=[]),
+        pytest.raises(ValueError, match="No statements data"),
+    ):
+        source.fetch(Dataset.FUNDAMENTALS_STATEMENTS, "AAPL", "2022-01-01", "2024-12-31")
 
 
 def test_fetch_shares_returns_normalized_frame(source):

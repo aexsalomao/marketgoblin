@@ -4,9 +4,11 @@ import polars as pl
 
 from marketgoblin._normalize import (
     normalize_dividends,
+    normalize_fundamentals_daily,
     normalize_ohlcv,
     normalize_shares,
     normalize_splits,
+    normalize_statements,
     parse_dates,
 )
 
@@ -126,6 +128,88 @@ def test_normalize_dividends_dtypes():
 def test_normalize_dividends_date_format():
     df = normalize_dividends(make_raw_dividends()).collect()
     assert df["date"].to_list() == [20240209, 20240510]
+
+
+def make_raw_fundamentals_daily() -> pl.LazyFrame:
+    return pl.DataFrame(
+        {
+            "date": [date(2024, 1, 2), date(2024, 1, 3)],
+            "market_cap": pl.Series([1_500_000_000_000, 1_650_000_000_000], dtype=pl.Int64),
+            "enterprise_val": pl.Series(
+                [1_550_000_000_000, 1_700_000_000_000], dtype=pl.Int64
+            ),
+            "pe_ratio": pl.Series([32.5, 32.6], dtype=pl.Float64),
+            "pb_ratio": pl.Series([50.0, 50.1], dtype=pl.Float64),
+            "trailing_peg_1y": pl.Series([2.0, 2.0], dtype=pl.Float64),
+            "symbol": ["AAPL", "AAPL"],
+        }
+    ).lazy()
+
+
+def test_normalize_fundamentals_daily_dtypes():
+    df = normalize_fundamentals_daily(make_raw_fundamentals_daily()).collect()
+    assert df.schema["market_cap"] == pl.Int64
+    assert df.schema["enterprise_val"] == pl.Int64
+    assert df.schema["pe_ratio"] == pl.Float32
+    assert df.schema["pb_ratio"] == pl.Float32
+    assert df.schema["trailing_peg_1y"] == pl.Float32
+    assert df.schema["date"] == pl.Int32
+
+
+def test_normalize_fundamentals_daily_date_format():
+    df = normalize_fundamentals_daily(make_raw_fundamentals_daily()).collect()
+    assert df["date"].to_list() == [20240102, 20240103]
+
+
+def test_normalize_fundamentals_daily_preserves_large_market_cap():
+    df = normalize_fundamentals_daily(make_raw_fundamentals_daily()).collect()
+    assert df["market_cap"][1] == 1_650_000_000_000
+
+
+def test_parse_dates_works_for_fundamentals_daily():
+    df = parse_dates(normalize_fundamentals_daily(make_raw_fundamentals_daily())).collect()
+    assert df.schema["date"] == pl.Date
+    assert df["date"][0] == date(2024, 1, 2)
+
+
+def make_raw_statements() -> pl.LazyFrame:
+    return pl.DataFrame(
+        {
+            "date": [date(2024, 8, 1), date(2024, 5, 2)],
+            "fiscal_year": pl.Series([2024, 2024], dtype=pl.Int64),
+            "fiscal_quarter": pl.Series([3, 2], dtype=pl.Int64),
+            "eps_diluted": pl.Series([1.40, 1.53], dtype=pl.Float64),
+            "eps_basic": pl.Series([1.41, 1.54], dtype=pl.Float64),
+            "revenue": pl.Series([85_777_000_000.0, 90_753_000_000.0], dtype=pl.Float64),
+            "symbol": ["AAPL", "AAPL"],
+        }
+    ).lazy()
+
+
+def test_normalize_statements_dtypes():
+    df = normalize_statements(make_raw_statements()).collect()
+    assert df.schema["date"] == pl.Int32
+    assert df.schema["fiscal_year"] == pl.Int16
+    assert df.schema["fiscal_quarter"] == pl.Int8
+    assert df.schema["eps_diluted"] == pl.Float32
+    assert df.schema["eps_basic"] == pl.Float32
+    assert df.schema["revenue"] == pl.Float64
+
+
+def test_normalize_statements_date_format():
+    df = normalize_statements(make_raw_statements()).collect()
+    assert df["date"].to_list() == [20240801, 20240502]
+
+
+def test_normalize_statements_preserves_large_revenue():
+    df = normalize_statements(make_raw_statements()).collect()
+    assert df["revenue"][0] == 85_777_000_000.0
+
+
+def test_parse_dates_works_for_statements():
+    df = parse_dates(normalize_statements(make_raw_statements())).collect()
+    assert df.schema["date"] == pl.Date
+    assert df["date"][0] == date(2024, 8, 1)
 
 
 def test_parse_dates_returns_date_type():

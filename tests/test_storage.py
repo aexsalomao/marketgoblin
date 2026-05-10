@@ -56,6 +56,38 @@ def make_splits_lf() -> pl.LazyFrame:
     ).lazy()
 
 
+def make_fundamentals_daily_lf() -> pl.LazyFrame:
+    return pl.DataFrame(
+        {
+            "date": pl.Series([20240102, 20240201], dtype=pl.Int32),
+            "market_cap": pl.Series([1_500_000_000_000, 1_700_000_000_000], dtype=pl.Int64),
+            "enterprise_val": pl.Series(
+                [1_550_000_000_000, 1_750_000_000_000], dtype=pl.Int64
+            ),
+            "pe_ratio": pl.Series([32.5, 33.0], dtype=pl.Float32),
+            "pb_ratio": pl.Series([50.0, 50.5], dtype=pl.Float32),
+            "trailing_peg_1y": pl.Series([2.0, 2.1], dtype=pl.Float32),
+            "symbol": ["AAPL"] * 2,
+        }
+    ).lazy()
+
+
+def make_statements_lf() -> pl.LazyFrame:
+    # Two filings landing in different months — exercises the monthly slice
+    # split for a quarterly-cadence dataset.
+    return pl.DataFrame(
+        {
+            "date": pl.Series([20240801, 20240502], dtype=pl.Int32),
+            "fiscal_year": pl.Series([2024, 2024], dtype=pl.Int16),
+            "fiscal_quarter": pl.Series([3, 2], dtype=pl.Int8),
+            "eps_diluted": pl.Series([1.40, 1.53], dtype=pl.Float32),
+            "eps_basic": pl.Series([1.41, 1.54], dtype=pl.Float32),
+            "revenue": pl.Series([85_777_000_000.0, 90_753_000_000.0], dtype=pl.Float64),
+            "symbol": ["AAPL", "AAPL"],
+        }
+    ).lazy()
+
+
 @pytest.fixture
 def storage(tmp_path) -> DiskStorage:
     return DiskStorage(tmp_path)
@@ -242,3 +274,106 @@ def test_load_splits_parse_dates(storage):
     ).collect()
     assert df.schema["date"] == pl.Date
     assert df["date"][0] == date(2020, 8, 31)
+
+
+def test_save_fundamentals_daily_creates_pq_files(storage, tmp_path):
+    storage.save("tiingo", "AAPL", Dataset.FUNDAMENTALS_DAILY, make_fundamentals_daily_lf())
+    assert (
+        tmp_path / "tiingo" / "fundamentals_daily" / "AAPL" / "AAPL_2024-01.pq"
+    ).exists()
+    assert (
+        tmp_path / "tiingo" / "fundamentals_daily" / "AAPL" / "AAPL_2024-02.pq"
+    ).exists()
+
+
+def test_save_fundamentals_daily_creates_sidecars(storage, tmp_path):
+    storage.save("tiingo", "AAPL", Dataset.FUNDAMENTALS_DAILY, make_fundamentals_daily_lf())
+    sidecar = (
+        tmp_path / "tiingo" / "fundamentals_daily" / "AAPL" / "AAPL_2024-01.json"
+    )
+    assert sidecar.exists()
+
+
+def test_load_fundamentals_daily_row_count(storage):
+    storage.save("tiingo", "AAPL", Dataset.FUNDAMENTALS_DAILY, make_fundamentals_daily_lf())
+    df = storage.load(
+        "tiingo", "AAPL", Dataset.FUNDAMENTALS_DAILY, "2024-01-01", "2024-12-31"
+    ).collect()
+    assert len(df) == 2
+
+
+def test_load_fundamentals_daily_schema(storage):
+    storage.save("tiingo", "AAPL", Dataset.FUNDAMENTALS_DAILY, make_fundamentals_daily_lf())
+    df = storage.load(
+        "tiingo", "AAPL", Dataset.FUNDAMENTALS_DAILY, "2024-01-01", "2024-12-31"
+    ).collect()
+    assert df.schema["date"] == pl.Int32
+    assert df.schema["market_cap"] == pl.Int64
+    assert df.schema["enterprise_val"] == pl.Int64
+    assert df.schema["pe_ratio"] == pl.Float32
+    assert df.schema["pb_ratio"] == pl.Float32
+    assert df.schema["trailing_peg_1y"] == pl.Float32
+
+
+def test_load_fundamentals_daily_parse_dates(storage):
+    storage.save("tiingo", "AAPL", Dataset.FUNDAMENTALS_DAILY, make_fundamentals_daily_lf())
+    df = storage.load(
+        "tiingo",
+        "AAPL",
+        Dataset.FUNDAMENTALS_DAILY,
+        "2024-01-01",
+        "2024-12-31",
+        parse_dates=True,
+    ).collect()
+    assert df.schema["date"] == pl.Date
+    assert df["date"][0] == date(2024, 1, 2)
+
+
+def test_save_statements_creates_pq_files(storage, tmp_path):
+    storage.save("tiingo", "AAPL", Dataset.FUNDAMENTALS_STATEMENTS, make_statements_lf())
+    base = tmp_path / "tiingo" / "fundamentals_statements" / "AAPL"
+    assert (base / "AAPL_2024-05.pq").exists()
+    assert (base / "AAPL_2024-08.pq").exists()
+
+
+def test_save_statements_creates_sidecars(storage, tmp_path):
+    storage.save("tiingo", "AAPL", Dataset.FUNDAMENTALS_STATEMENTS, make_statements_lf())
+    sidecar = (
+        tmp_path / "tiingo" / "fundamentals_statements" / "AAPL" / "AAPL_2024-05.json"
+    )
+    assert sidecar.exists()
+
+
+def test_load_statements_row_count(storage):
+    storage.save("tiingo", "AAPL", Dataset.FUNDAMENTALS_STATEMENTS, make_statements_lf())
+    df = storage.load(
+        "tiingo", "AAPL", Dataset.FUNDAMENTALS_STATEMENTS, "2024-01-01", "2024-12-31"
+    ).collect()
+    assert len(df) == 2
+
+
+def test_load_statements_schema(storage):
+    storage.save("tiingo", "AAPL", Dataset.FUNDAMENTALS_STATEMENTS, make_statements_lf())
+    df = storage.load(
+        "tiingo", "AAPL", Dataset.FUNDAMENTALS_STATEMENTS, "2024-01-01", "2024-12-31"
+    ).collect()
+    assert df.schema["date"] == pl.Int32
+    assert df.schema["fiscal_year"] == pl.Int16
+    assert df.schema["fiscal_quarter"] == pl.Int8
+    assert df.schema["eps_diluted"] == pl.Float32
+    assert df.schema["eps_basic"] == pl.Float32
+    assert df.schema["revenue"] == pl.Float64
+
+
+def test_load_statements_parse_dates(storage):
+    storage.save("tiingo", "AAPL", Dataset.FUNDAMENTALS_STATEMENTS, make_statements_lf())
+    df = storage.load(
+        "tiingo",
+        "AAPL",
+        Dataset.FUNDAMENTALS_STATEMENTS,
+        "2024-01-01",
+        "2024-12-31",
+        parse_dates=True,
+    ).collect()
+    assert df.schema["date"] == pl.Date
+    assert sorted(df["date"].to_list()) == [date(2024, 5, 2), date(2024, 8, 1)]

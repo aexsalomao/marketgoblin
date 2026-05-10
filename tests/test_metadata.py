@@ -3,7 +3,15 @@ import json
 import polars as pl
 import pytest
 
-from marketgoblin._metadata import build_dividends, build_ohlcv, build_shares, build_splits, write
+from marketgoblin._metadata import (
+    build_dividends,
+    build_fundamentals_daily,
+    build_fundamentals_statements,
+    build_ohlcv,
+    build_shares,
+    build_splits,
+    write,
+)
 
 
 def make_ohlcv_chunk() -> pl.DataFrame:
@@ -51,6 +59,36 @@ def make_splits_chunk() -> pl.DataFrame:
             "date": pl.Series([20200831], dtype=pl.Int32),
             "split_factor": pl.Series([4.0], dtype=pl.Float32),
             "symbol": ["AAPL"],
+        }
+    )
+
+
+def make_fundamentals_daily_chunk() -> pl.DataFrame:
+    return pl.DataFrame(
+        {
+            "date": pl.Series([20240102, 20240103], dtype=pl.Int32),
+            "market_cap": pl.Series([1_500_000_000_000, 1_650_000_000_000], dtype=pl.Int64),
+            "enterprise_val": pl.Series(
+                [1_550_000_000_000, 1_700_000_000_000], dtype=pl.Int64
+            ),
+            "pe_ratio": pl.Series([32.5, 32.6], dtype=pl.Float32),
+            "pb_ratio": pl.Series([50.0, 50.1], dtype=pl.Float32),
+            "trailing_peg_1y": pl.Series([2.0, 2.0], dtype=pl.Float32),
+            "symbol": ["AAPL"] * 2,
+        }
+    )
+
+
+def make_statements_chunk() -> pl.DataFrame:
+    return pl.DataFrame(
+        {
+            "date": pl.Series([20240801, 20240502], dtype=pl.Int32),
+            "fiscal_year": pl.Series([2024, 2024], dtype=pl.Int16),
+            "fiscal_quarter": pl.Series([3, 2], dtype=pl.Int8),
+            "eps_diluted": pl.Series([1.40, 1.53], dtype=pl.Float32),
+            "eps_basic": pl.Series([1.41, 1.54], dtype=pl.Float32),
+            "revenue": pl.Series([85_777_000_000.0, 90_753_000_000.0], dtype=pl.Float64),
+            "symbol": ["AAPL", "AAPL"],
         }
     )
 
@@ -258,3 +296,109 @@ def test_build_splits_omits_ohlcv_only_keys(fake_pq):
     assert "missing_days" not in meta
     assert "expected_trading_days" not in meta
     assert "has_adjusted" not in meta
+
+
+def test_build_fundamentals_daily_has_all_keys(fake_pq):
+    meta = build_fundamentals_daily(
+        make_fundamentals_daily_chunk(), "tiingo", "AAPL", "2024-01", 0
+    )
+    expected = {
+        "symbol",
+        "provider",
+        "year_month",
+        "row_count",
+        "start_date",
+        "end_date",
+        "columns",
+        "downloaded_at",
+        "file_size_bytes",
+        "market_cap_min",
+        "market_cap_max",
+        "pe_ratio_min",
+        "pe_ratio_max",
+    }
+    assert set(meta.keys()) == expected
+
+
+def test_build_fundamentals_daily_stats(fake_pq):
+    meta = build_fundamentals_daily(
+        make_fundamentals_daily_chunk(), "tiingo", "AAPL", "2024-01", 0
+    )
+    assert meta["symbol"] == "AAPL"
+    assert meta["row_count"] == 2
+    assert meta["start_date"] == 20240102
+    assert meta["end_date"] == 20240103
+    assert meta["market_cap_min"] == 1_500_000_000_000
+    assert meta["market_cap_max"] == 1_650_000_000_000
+    assert meta["pe_ratio_min"] == pytest.approx(32.5, rel=1e-3)
+    assert meta["pe_ratio_max"] == pytest.approx(32.6, rel=1e-3)
+
+
+def test_build_fundamentals_daily_handles_null_metrics(fake_pq):
+    chunk = pl.DataFrame(
+        {
+            "date": pl.Series([20240102], dtype=pl.Int32),
+            "market_cap": pl.Series([None], dtype=pl.Int64),
+            "enterprise_val": pl.Series([None], dtype=pl.Int64),
+            "pe_ratio": pl.Series([None], dtype=pl.Float32),
+            "pb_ratio": pl.Series([None], dtype=pl.Float32),
+            "trailing_peg_1y": pl.Series([None], dtype=pl.Float32),
+            "symbol": ["AAPL"],
+        }
+    )
+    meta = build_fundamentals_daily(chunk, "tiingo", "AAPL", "2024-01", 0)
+    assert meta["market_cap_min"] is None
+    assert meta["pe_ratio_min"] is None
+
+
+def test_build_fundamentals_statements_has_all_keys(fake_pq):
+    meta = build_fundamentals_statements(
+        make_statements_chunk(), "tiingo", "AAPL", "2024-08", 0
+    )
+    expected = {
+        "symbol",
+        "provider",
+        "year_month",
+        "row_count",
+        "start_date",
+        "end_date",
+        "columns",
+        "downloaded_at",
+        "file_size_bytes",
+        "fiscal_year_min",
+        "fiscal_year_max",
+        "eps_diluted_min",
+        "eps_diluted_max",
+    }
+    assert set(meta.keys()) == expected
+
+
+def test_build_fundamentals_statements_stats(fake_pq):
+    meta = build_fundamentals_statements(
+        make_statements_chunk(), "tiingo", "AAPL", "2024-08", 0
+    )
+    assert meta["symbol"] == "AAPL"
+    assert meta["row_count"] == 2
+    assert meta["start_date"] == 20240502
+    assert meta["end_date"] == 20240801
+    assert meta["fiscal_year_min"] == 2024
+    assert meta["fiscal_year_max"] == 2024
+    assert meta["eps_diluted_min"] == pytest.approx(1.40, rel=1e-3)
+    assert meta["eps_diluted_max"] == pytest.approx(1.53, rel=1e-3)
+
+
+def test_build_fundamentals_statements_handles_null_eps(fake_pq):
+    chunk = pl.DataFrame(
+        {
+            "date": pl.Series([20240801], dtype=pl.Int32),
+            "fiscal_year": pl.Series([2024], dtype=pl.Int16),
+            "fiscal_quarter": pl.Series([3], dtype=pl.Int8),
+            "eps_diluted": pl.Series([None], dtype=pl.Float32),
+            "eps_basic": pl.Series([None], dtype=pl.Float32),
+            "revenue": pl.Series([85_777_000_000.0], dtype=pl.Float64),
+            "symbol": ["AAPL"],
+        }
+    )
+    meta = build_fundamentals_statements(chunk, "tiingo", "AAPL", "2024-08", 0)
+    assert meta["eps_diluted_min"] is None
+    assert meta["eps_diluted_max"] is None

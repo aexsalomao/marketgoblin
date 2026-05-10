@@ -12,6 +12,10 @@ from typing import Any
 import polars as pl
 
 from marketgoblin._metadata import build_dividends as _build_dividends_metadata
+from marketgoblin._metadata import build_fundamentals_daily as _build_fundamentals_daily_metadata
+from marketgoblin._metadata import (
+    build_fundamentals_statements as _build_fundamentals_statements_metadata,
+)
 from marketgoblin._metadata import build_ohlcv as _build_ohlcv_metadata
 from marketgoblin._metadata import build_shares as _build_shares_metadata
 from marketgoblin._metadata import build_splits as _build_splits_metadata
@@ -160,6 +164,14 @@ class DiskStorage:
             return _build_dividends_metadata(chunk, provider, symbol, ym, file_size_bytes)
         if dataset == Dataset.SPLITS:
             return _build_splits_metadata(chunk, provider, symbol, ym, file_size_bytes)
+        if dataset == Dataset.FUNDAMENTALS_DAILY:
+            return _build_fundamentals_daily_metadata(
+                chunk, provider, symbol, ym, file_size_bytes
+            )
+        if dataset == Dataset.FUNDAMENTALS_STATEMENTS:
+            return _build_fundamentals_statements_metadata(
+                chunk, provider, symbol, ym, file_size_bytes
+            )
         return _build_shares_metadata(chunk, provider, symbol, ym, file_size_bytes)
 
     def _atomic_write(self, df: pl.DataFrame, path: Path) -> None:

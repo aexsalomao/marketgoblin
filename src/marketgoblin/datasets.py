@@ -11,3 +11,5 @@ class Dataset(StrEnum):
     SHARES = "shares"
     DIVIDENDS = "dividends"
     SPLITS = "splits"
+    FUNDAMENTALS_DAILY = "fundamentals_daily"
+    FUNDAMENTALS_STATEMENTS = "fundamentals_statements"

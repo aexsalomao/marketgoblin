@@ -157,6 +157,123 @@ def prices_rows_to_splits(rows: list[dict[str, Any]], symbol: str) -> pl.LazyFra
     )
 
 
+# Wire-level schema for daily Fundamentals from_dicts. Declared explicitly so a
+# missing field on a row materializes as a null column instead of crashing the
+# projection; Tiingo skips ratios for tickers without earnings (pre-IPO
+# history, ADRs).
+_FUNDAMENTALS_DAILY_WIRE_SCHEMA: dict[str, pl.DataType] = {
+    "date": pl.String(),
+    "marketCap": pl.Float64(),
+    "enterpriseVal": pl.Float64(),
+    "peRatio": pl.Float64(),
+    "pbRatio": pl.Float64(),
+    "trailingPEG1Y": pl.Float64(),
+}
+
+
+def fundamentals_daily_rows_to_lf(
+    rows: list[dict[str, Any]],
+    symbol: str,
+) -> pl.LazyFrame:
+    """Wrap Tiingo's daily-fundamentals payload in a typed LazyFrame.
+
+    Output columns: ``date`` (pl.Date), ``market_cap`` (Float64 — cast to
+    Int64 by ``normalize_fundamentals_daily``), ``enterprise_val`` (Float64),
+    ``pe_ratio``, ``pb_ratio``, ``trailing_peg_1y`` (all Float64), and
+    ``symbol`` (str). Missing fields on a row surface as null. Raises
+    ``ValueError`` on empty input.
+    """
+    if not rows:
+        raise ValueError(f"No fundamentals data returned for {symbol}")
+    return (
+        pl.from_dicts(rows, schema=_FUNDAMENTALS_DAILY_WIRE_SCHEMA)
+        .lazy()
+        .pipe(parse_tiingo_date_col)
+        .with_columns(pl.lit(symbol.upper()).alias("symbol"))
+        .select(
+            "date",
+            pl.col("marketCap").alias("market_cap"),
+            pl.col("enterpriseVal").alias("enterprise_val"),
+            pl.col("peRatio").alias("pe_ratio"),
+            pl.col("pbRatio").alias("pb_ratio"),
+            pl.col("trailingPEG1Y").alias("trailing_peg_1y"),
+            "symbol",
+        )
+    )
+
+
+# Income-statement codes pulled from each Tiingo quarterly payload.
+# epsDil and epsBasic are the standard PEAD inputs; revenue is added because
+# it costs nothing extra (one HTTP call covers all codes) and unlocks
+# revenue-surprise SUE later.
+_INCOME_STATEMENT_CODES: tuple[str, ...] = ("epsDil", "epsBasic", "revenue")
+
+
+def _index_data_codes(items: list[dict[str, Any]]) -> dict[str, Any]:
+    """Index a Tiingo statement-section list by its ``dataCode`` field.
+
+    Each Tiingo statement section (incomeStatement, balanceSheet, …) is a
+    list of ``{dataCode, value}`` pairs. This collapses one section into a
+    flat dict keyed by code, ignoring rows missing the code.
+    """
+    return {item["dataCode"]: item.get("value") for item in items if "dataCode" in item}
+
+
+def _statement_payload_to_row(payload: dict[str, Any]) -> dict[str, Any]:
+    """Flatten one quarterly Tiingo statement payload into a single dict.
+
+    Tiingo emits the income statement as a nested list of ``{dataCode,
+    value}`` pairs; we lift the codes we care about into named columns and
+    drop everything else. Returns a dict with the wire-schema column names
+    so it composes cleanly with ``pl.from_dicts(rows, schema=…)`` below.
+    """
+    income = payload.get("statementData", {}).get("incomeStatement", []) or []
+    indexed = _index_data_codes(income)
+    return {
+        "date": payload.get("date"),  # Filing date (ISO string)
+        "fiscal_year": coerce_int(payload.get("year")),
+        "fiscal_quarter": coerce_int(payload.get("quarter")),
+        "eps_diluted": coerce_float(indexed.get("epsDil")),
+        "eps_basic": coerce_float(indexed.get("epsBasic")),
+        "revenue": coerce_float(indexed.get("revenue")),
+    }
+
+
+# Wire-level schema for statements from_dicts.
+_STATEMENTS_WIRE_SCHEMA: dict[str, pl.DataType] = {
+    "date": pl.String(),
+    "fiscal_year": pl.Int64(),
+    "fiscal_quarter": pl.Int64(),
+    "eps_diluted": pl.Float64(),
+    "eps_basic": pl.Float64(),
+    "revenue": pl.Float64(),
+}
+
+
+def statements_rows_to_lf(
+    rows: list[dict[str, Any]],
+    symbol: str,
+) -> pl.LazyFrame:
+    """Wrap Tiingo's quarterly-statements payload in a typed LazyFrame.
+
+    The ``date`` column carries the *filing date* (the day the report was
+    posted) — that's the field downstream consumers use to filter to
+    "strictly before t0" for SUE. Fiscal-period identity comes from
+    ``(fiscal_year, fiscal_quarter)``; quarter-end is not emitted because
+    Tiingo's payload doesn't carry the company's fiscal calendar and most
+    consumers don't need it. Raises ``ValueError`` on empty input.
+    """
+    if not rows:
+        raise ValueError(f"No statements data returned for {symbol}")
+    flattened = [_statement_payload_to_row(payload) for payload in rows]
+    return (
+        pl.from_dicts(flattened, schema=_STATEMENTS_WIRE_SCHEMA)
+        .lazy()
+        .pipe(parse_tiingo_date_col)
+        .with_columns(pl.lit(symbol.upper()).alias("symbol"))
+    )
+
+
 def derive_shares_from_marketcap(
     prices_rows: list[dict[str, Any]],
     fundamentals_rows: list[dict[str, Any]],

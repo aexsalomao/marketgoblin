@@ -15,9 +15,11 @@ from tiingo import TiingoClient
 
 from marketgoblin._normalize import (
     normalize_dividends,
+    normalize_fundamentals_daily,
     normalize_ohlcv,
     normalize_shares,
     normalize_splits,
+    normalize_statements,
 )
 from marketgoblin.classification import Classification
 from marketgoblin.datasets import Dataset
@@ -28,9 +30,11 @@ from marketgoblin.sources._tiingo_parsing import (
     fetch_fundamentals_meta,
     fetch_latest_close,
     fetch_latest_fundamentals,
+    fundamentals_daily_rows_to_lf,
     prices_rows_to_dividends,
     prices_rows_to_splits,
     prices_rows_to_stacked_ohlcv,
+    statements_rows_to_lf,
 )
 from marketgoblin.sources.base import BaseSource, Fetcher
 from marketgoblin.ticker_metadata import TickerMetadata
@@ -66,7 +70,13 @@ class TiingoSource(BaseSource):
 
     name = "tiingo"
 
-    def __init__(self, api_key: str | None = None, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        api_key: str | None = None,
+        *,
+        as_reported: bool = True,
+        **kwargs: Any,
+    ) -> None:
         # Resolve from TIINGO_API_KEY before super() stores it. Without this,
         # callers who rely on the env var (the pattern the tiingo client itself
         # documents) end up with self.api_key=None, which silently breaks
@@ -76,6 +86,10 @@ class TiingoSource(BaseSource):
         super().__init__(api_key, **kwargs)
         config = {"api_key": api_key} if api_key else None
         self._client = TiingoClient(config)
+        # asReported=True returns the original announced numbers (the values
+        # the market saw at filing time); =False returns latest restated
+        # values. PEAD/SUE wants point-in-time, so True is the default.
+        self._as_reported = as_reported
 
     def _build_dispatch(self) -> dict[Dataset, Fetcher]:
         return {
@@ -83,6 +97,8 @@ class TiingoSource(BaseSource):
             Dataset.SHARES: self._fetch_shares,
             Dataset.DIVIDENDS: self._fetch_dividends,
             Dataset.SPLITS: self._fetch_splits,
+            Dataset.FUNDAMENTALS_DAILY: self._fetch_fundamentals_daily,
+            Dataset.FUNDAMENTALS_STATEMENTS: self._fetch_fundamentals_statements,
         }
 
     def _fetch_ohlcv(self, symbol: str, start: str, end: str) -> pl.LazyFrame:
@@ -148,6 +164,33 @@ class TiingoSource(BaseSource):
                 .pipe(normalize_splits)
                 .filter(pl.col("date").is_between(start_int, end_int))
             )
+
+        return self._retry_fetch(do_fetch, symbol)
+
+    def _fetch_fundamentals_daily(self, symbol: str, start: str, end: str) -> pl.LazyFrame:
+        def do_fetch() -> pl.LazyFrame:
+            rows = self._client.get_fundamentals_daily(
+                symbol.lower(),
+                startDate=start,
+                endDate=end,
+                fmt="json",
+            )
+            return fundamentals_daily_rows_to_lf(rows, symbol).pipe(normalize_fundamentals_daily)
+
+        return self._retry_fetch(do_fetch, symbol)
+
+    def _fetch_fundamentals_statements(
+        self, symbol: str, start: str, end: str
+    ) -> pl.LazyFrame:
+        def do_fetch() -> pl.LazyFrame:
+            rows = self._client.get_fundamentals_statements(
+                symbol.lower(),
+                startDate=start,
+                endDate=end,
+                asReported=self._as_reported,
+                fmt="json",
+            )
+            return statements_rows_to_lf(rows, symbol).pipe(normalize_statements)
 
         return self._retry_fetch(do_fetch, symbol)
 

@@ -195,6 +195,99 @@ def build_splits(
     }
 
 
+def build_fundamentals_daily(
+    chunk: pl.DataFrame,
+    provider: str,
+    symbol: str,
+    ym: str,
+    file_size_bytes: int,
+) -> dict[str, Any]:
+    """Build a metadata dict for a saved daily-fundamentals parquet slice.
+
+    Daily-cadence valuation metrics (one row per trading day). No
+    missing-days analysis: the upstream endpoint occasionally drops bars
+    around corporate actions, and a slice missing a few days is normal —
+    not worth the noise of an OHLCV-style alarm.
+    """
+    stats = chunk.select(
+        [
+            pl.col("date").min().alias("start_date"),
+            pl.col("date").max().alias("end_date"),
+            pl.len().alias("row_count"),
+            pl.col("market_cap").min().alias("market_cap_min"),
+            pl.col("market_cap").max().alias("market_cap_max"),
+            pl.col("pe_ratio").min().alias("pe_ratio_min"),
+            pl.col("pe_ratio").max().alias("pe_ratio_max"),
+        ]
+    ).row(0, named=True)
+
+    return {
+        "symbol": symbol,
+        "provider": provider,
+        "year_month": ym,
+        "row_count": stats["row_count"],
+        "start_date": stats["start_date"],
+        "end_date": stats["end_date"],
+        "columns": chunk.columns,
+        "downloaded_at": datetime.now().isoformat(timespec="seconds"),
+        "file_size_bytes": file_size_bytes,
+        "market_cap_min": _safe_int(stats["market_cap_min"]),
+        "market_cap_max": _safe_int(stats["market_cap_max"]),
+        "pe_ratio_min": _safe_float(stats["pe_ratio_min"]),
+        "pe_ratio_max": _safe_float(stats["pe_ratio_max"]),
+    }
+
+
+def build_fundamentals_statements(
+    chunk: pl.DataFrame,
+    provider: str,
+    symbol: str,
+    ym: str,
+    file_size_bytes: int,
+) -> dict[str, Any]:
+    """Build a metadata dict for a saved quarterly-statements parquet slice.
+
+    Quarterly cadence — typically 1 row per slice (one filing per fiscal
+    quarter, landing in the filing-date month). Captures fiscal-period
+    coverage and EPS bounds for sanity-checking against known outliers.
+    """
+    stats = chunk.select(
+        [
+            pl.col("date").min().alias("start_date"),
+            pl.col("date").max().alias("end_date"),
+            pl.len().alias("row_count"),
+            pl.col("fiscal_year").min().alias("fiscal_year_min"),
+            pl.col("fiscal_year").max().alias("fiscal_year_max"),
+            pl.col("eps_diluted").min().alias("eps_diluted_min"),
+            pl.col("eps_diluted").max().alias("eps_diluted_max"),
+        ]
+    ).row(0, named=True)
+
+    return {
+        "symbol": symbol,
+        "provider": provider,
+        "year_month": ym,
+        "row_count": stats["row_count"],
+        "start_date": stats["start_date"],
+        "end_date": stats["end_date"],
+        "columns": chunk.columns,
+        "downloaded_at": datetime.now().isoformat(timespec="seconds"),
+        "file_size_bytes": file_size_bytes,
+        "fiscal_year_min": _safe_int(stats["fiscal_year_min"]),
+        "fiscal_year_max": _safe_int(stats["fiscal_year_max"]),
+        "eps_diluted_min": _safe_float(stats["eps_diluted_min"]),
+        "eps_diluted_max": _safe_float(stats["eps_diluted_max"]),
+    }
+
+
+def _safe_int(value: Any) -> int | None:
+    return int(value) if value is not None else None
+
+
+def _safe_float(value: Any) -> float | None:
+    return float(value) if value is not None else None
+
+
 def write(data: dict[str, Any], path: Path) -> None:
     """Atomically write a dict as JSON at ``path``. Creates parent dirs if needed.
 

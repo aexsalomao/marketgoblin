@@ -102,3 +102,28 @@ with tempfile.TemporaryDirectory() as tmp:
     ).collect()
     print(splits_df)
     print(f"Schema: {splits_df.schema}")
+
+    # -----------------------------------------------------------------------
+    # 8. Daily fundamentals fetch — Tiingo-only, paid endpoint
+    # -----------------------------------------------------------------------
+    if PROVIDER == "tiingo":
+        print("\n=== 8. Daily fundamentals fetch (AAPL) ===")
+        fundamentals_df = goblin.fetch(
+            "AAPL", START, END, dataset=Dataset.FUNDAMENTALS_DAILY, parse_dates=True
+        ).collect()
+        print(fundamentals_df)
+        print(f"Schema: {fundamentals_df.schema}")
+
+        # -------------------------------------------------------------------
+        # 9. Quarterly statements fetch — Tiingo-only, paid endpoint
+        # -------------------------------------------------------------------
+        print("\n=== 9. Quarterly statements fetch (AAPL) ===")
+        statements_df = goblin.fetch(
+            "AAPL",
+            START,
+            END,
+            dataset=Dataset.FUNDAMENTALS_STATEMENTS,
+            parse_dates=True,
+        ).collect()
+        print(statements_df)
+        print(f"Schema: {statements_df.schema}")
