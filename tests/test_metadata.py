@@ -85,8 +85,10 @@ def make_statements_chunk() -> pl.DataFrame:
             "date": pl.Series([20240801, 20240502], dtype=pl.Int32),
             "fiscal_year": pl.Series([2024, 2024], dtype=pl.Int16),
             "fiscal_quarter": pl.Series([3, 2], dtype=pl.Int8),
-            "eps_diluted": pl.Series([1.40, 1.53], dtype=pl.Float32),
-            "eps_basic": pl.Series([1.41, 1.54], dtype=pl.Float32),
+            "eps_diluted_as_reported": pl.Series([1.40, 1.53], dtype=pl.Float32),
+            "eps_basic_as_reported": pl.Series([1.41, 1.54], dtype=pl.Float32),
+            "eps_diluted_adjusted": pl.Series([1.42, 1.55], dtype=pl.Float32),
+            "eps_basic_adjusted": pl.Series([1.43, 1.56], dtype=pl.Float32),
             "revenue": pl.Series([85_777_000_000.0, 90_753_000_000.0], dtype=pl.Float64),
             "symbol": ["AAPL", "AAPL"],
         }
@@ -367,8 +369,8 @@ def test_build_fundamentals_statements_has_all_keys(fake_pq):
         "file_size_bytes",
         "fiscal_year_min",
         "fiscal_year_max",
-        "eps_diluted_min",
-        "eps_diluted_max",
+        "eps_diluted_as_reported_min",
+        "eps_diluted_as_reported_max",
     }
     assert set(meta.keys()) == expected
 
@@ -383,8 +385,8 @@ def test_build_fundamentals_statements_stats(fake_pq):
     assert meta["end_date"] == 20240801
     assert meta["fiscal_year_min"] == 2024
     assert meta["fiscal_year_max"] == 2024
-    assert meta["eps_diluted_min"] == pytest.approx(1.40, rel=1e-3)
-    assert meta["eps_diluted_max"] == pytest.approx(1.53, rel=1e-3)
+    assert meta["eps_diluted_as_reported_min"] == pytest.approx(1.40, rel=1e-3)
+    assert meta["eps_diluted_as_reported_max"] == pytest.approx(1.53, rel=1e-3)
 
 
 def test_build_fundamentals_statements_handles_null_eps(fake_pq):
@@ -393,12 +395,14 @@ def test_build_fundamentals_statements_handles_null_eps(fake_pq):
             "date": pl.Series([20240801], dtype=pl.Int32),
             "fiscal_year": pl.Series([2024], dtype=pl.Int16),
             "fiscal_quarter": pl.Series([3], dtype=pl.Int8),
-            "eps_diluted": pl.Series([None], dtype=pl.Float32),
-            "eps_basic": pl.Series([None], dtype=pl.Float32),
+            "eps_diluted_as_reported": pl.Series([None], dtype=pl.Float32),
+            "eps_basic_as_reported": pl.Series([None], dtype=pl.Float32),
+            "eps_diluted_adjusted": pl.Series([None], dtype=pl.Float32),
+            "eps_basic_adjusted": pl.Series([None], dtype=pl.Float32),
             "revenue": pl.Series([85_777_000_000.0], dtype=pl.Float64),
             "symbol": ["AAPL"],
         }
     )
     meta = build_fundamentals_statements(chunk, "tiingo", "AAPL", "2024-08", 0)
-    assert meta["eps_diluted_min"] is None
-    assert meta["eps_diluted_max"] is None
+    assert meta["eps_diluted_as_reported_min"] is None
+    assert meta["eps_diluted_as_reported_max"] is None

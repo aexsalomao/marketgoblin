@@ -79,17 +79,21 @@ def normalize_fundamentals_daily(lf: pl.LazyFrame) -> pl.LazyFrame:
 def normalize_statements(lf: pl.LazyFrame) -> pl.LazyFrame:
     """Cast quarterly-statements frame to the on-disk schema.
 
-    ``date`` carries the filing date (cast to int32 YYYYMMDD per project
-    convention; ``parse_dates`` recovers it as ``pl.Date`` on load).
-    Revenue stays float64 because large-cap quarterly revenue (1e11+)
-    overflows float32's safe-integer range. EPS is float32 — values rarely
+    Carries four EPS columns — diluted/basic × as-reported/adjusted — so
+    downstream PEAD/SUE consumers can swap variants without re-fetching.
+    ``date`` is the filing date (cast to int32 YYYYMMDD per project
+    convention; ``parse_dates`` recovers ``pl.Date`` on load). Revenue
+    stays float64 because large-cap quarterly revenue (1e11+) overflows
+    float32's safe-integer range. EPS columns are float32 — values rarely
     exceed ±100 and the precision loss is below reporting granularity.
     """
     return lf.with_columns(
         pl.col("fiscal_year").cast(pl.Int16),
         pl.col("fiscal_quarter").cast(pl.Int8),
-        pl.col("eps_diluted").cast(pl.Float32),
-        pl.col("eps_basic").cast(pl.Float32),
+        pl.col("eps_diluted_as_reported").cast(pl.Float32),
+        pl.col("eps_basic_as_reported").cast(pl.Float32),
+        pl.col("eps_diluted_adjusted").cast(pl.Float32),
+        pl.col("eps_basic_adjusted").cast(pl.Float32),
         pl.col("revenue").cast(pl.Float64),
         pl.col("date").dt.strftime("%Y%m%d").cast(pl.Int32),
     )

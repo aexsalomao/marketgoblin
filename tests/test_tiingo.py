@@ -105,10 +105,8 @@ def _make_prices_rows_with_split() -> list[dict[str, Any]]:
     ]
 
 
-def _make_statements_rows() -> list[dict[str, Any]]:
-    """Two quarterly Tiingo statements payloads. Income-statement section is a
-    list of {dataCode, value} pairs; missing codes simulate the real wire shape.
-    """
+def _make_statements_rows_as_reported() -> list[dict[str, Any]]:
+    """Tiingo's asReported=True payload — point-in-time announced values."""
     return [
         {
             "date": "2024-08-01T00:00:00.000Z",
@@ -130,6 +128,37 @@ def _make_statements_rows() -> list[dict[str, Any]]:
                 "incomeStatement": [
                     {"dataCode": "epsDil", "value": 1.53},
                     {"dataCode": "epsBasic", "value": 1.54},
+                    {"dataCode": "revenue", "value": 90_753_000_000},
+                ],
+            },
+        },
+    ]
+
+
+def _make_statements_rows_adjusted() -> list[dict[str, Any]]:
+    """Tiingo's asReported=False payload — latest restated / adjusted values.
+    Slightly different EPS to exercise the variant-merging join."""
+    return [
+        {
+            "date": "2024-08-01T00:00:00.000Z",
+            "year": 2024,
+            "quarter": 3,
+            "statementData": {
+                "incomeStatement": [
+                    {"dataCode": "epsDil", "value": 1.42},
+                    {"dataCode": "epsBasic", "value": 1.43},
+                    {"dataCode": "revenue", "value": 85_777_000_000},
+                ],
+            },
+        },
+        {
+            "date": "2024-05-02T00:00:00.000Z",
+            "year": 2024,
+            "quarter": 2,
+            "statementData": {
+                "incomeStatement": [
+                    {"dataCode": "epsDil", "value": 1.55},
+                    {"dataCode": "epsBasic", "value": 1.56},
                     {"dataCode": "revenue", "value": 90_753_000_000},
                 ],
             },
@@ -295,21 +324,68 @@ def test_fundamentals_daily_rows_to_lf_raises_on_empty():
         fundamentals_daily_rows_to_lf([], "AAPL")
 
 
-def test_statements_rows_to_lf_extracts_income_codes():
-    df = statements_rows_to_lf(_make_statements_rows(), "AAPL").collect()
+def test_statements_rows_to_lf_extracts_both_variants():
+    df = statements_rows_to_lf(
+        _make_statements_rows_as_reported(),
+        _make_statements_rows_adjusted(),
+        "AAPL",
+    ).collect()
     assert df.height == 2
     assert df.schema["date"] == pl.Date
     assert sorted(df["fiscal_year"].to_list()) == [2024, 2024]
     assert sorted(df["fiscal_quarter"].to_list()) == [2, 3]
     by_quarter = {row["fiscal_quarter"]: row for row in df.iter_rows(named=True)}
-    assert by_quarter[3]["eps_diluted"] == pytest.approx(1.40)
-    assert by_quarter[3]["eps_basic"] == pytest.approx(1.41)
+    # As-reported and adjusted EPS coexist in the same row
+    assert by_quarter[3]["eps_diluted_as_reported"] == pytest.approx(1.40)
+    assert by_quarter[3]["eps_basic_as_reported"] == pytest.approx(1.41)
+    assert by_quarter[3]["eps_diluted_adjusted"] == pytest.approx(1.42)
+    assert by_quarter[3]["eps_basic_adjusted"] == pytest.approx(1.43)
     assert by_quarter[3]["revenue"] == 85_777_000_000.0
     assert by_quarter[3]["symbol"] == "AAPL"
 
 
+def test_statements_rows_to_lf_handles_one_side_missing_quarter():
+    # Adjusted side carries an extra quarter the as-reported call didn't have
+    # (common: very old history is sometimes only in restated form).
+    extra_adjusted = _make_statements_rows_adjusted() + [
+        {
+            "date": "2024-02-01T00:00:00.000Z",
+            "year": 2024,
+            "quarter": 1,
+            "statementData": {
+                "incomeStatement": [
+                    {"dataCode": "epsDil", "value": 1.99},
+                    {"dataCode": "epsBasic", "value": 2.00},
+                ],
+            },
+        },
+    ]
+    df = statements_rows_to_lf(
+        _make_statements_rows_as_reported(),
+        extra_adjusted,
+        "AAPL",
+    ).collect()
+    assert df.height == 3
+    by_quarter = {row["fiscal_quarter"]: row for row in df.iter_rows(named=True)}
+    # Q1 row has nulls on the as-reported side
+    assert by_quarter[1]["eps_diluted_as_reported"] is None
+    assert by_quarter[1]["eps_diluted_adjusted"] == pytest.approx(1.99)
+    assert by_quarter[1]["date"] == date(2024, 2, 1)
+
+
+def test_statements_rows_to_lf_handles_empty_adjusted_side():
+    df = statements_rows_to_lf(
+        _make_statements_rows_as_reported(),
+        [],
+        "AAPL",
+    ).collect()
+    assert df.height == 2
+    assert df["eps_diluted_adjusted"].to_list() == [None, None]
+    assert df["eps_diluted_as_reported"].to_list() == [pytest.approx(1.40), pytest.approx(1.53)]
+
+
 def test_statements_rows_to_lf_handles_missing_income_codes():
-    rows = [
+    as_reported = [
         {
             "date": "2024-08-01T00:00:00.000Z",
             "year": 2024,
@@ -319,27 +395,31 @@ def test_statements_rows_to_lf_handles_missing_income_codes():
             },
         },
     ]
-    df = statements_rows_to_lf(rows, "AAPL").collect()
+    df = statements_rows_to_lf(as_reported, [], "AAPL").collect()
     assert df.height == 1
-    assert df["eps_diluted"].to_list() == [pytest.approx(1.40)]
-    assert df["eps_basic"].to_list() == [None]
+    assert df["eps_diluted_as_reported"].to_list() == [pytest.approx(1.40)]
+    assert df["eps_basic_as_reported"].to_list() == [None]
     assert df["revenue"].to_list() == [None]
 
 
 def test_statements_rows_to_lf_handles_missing_statement_data():
     rows = [{"date": "2024-08-01T00:00:00.000Z", "year": 2024, "quarter": 3}]
-    df = statements_rows_to_lf(rows, "AAPL").collect()
+    df = statements_rows_to_lf(rows, [], "AAPL").collect()
     assert df.height == 1
-    assert df["eps_diluted"].to_list() == [None]
+    assert df["eps_diluted_as_reported"].to_list() == [None]
 
 
-def test_statements_rows_to_lf_raises_on_empty():
+def test_statements_rows_to_lf_raises_on_both_empty():
     with pytest.raises(ValueError, match="No statements data"):
-        statements_rows_to_lf([], "AAPL")
+        statements_rows_to_lf([], [], "AAPL")
 
 
 def test_statements_rows_to_lf_uppercases_symbol():
-    df = statements_rows_to_lf(_make_statements_rows(), "aapl").collect()
+    df = statements_rows_to_lf(
+        _make_statements_rows_as_reported(),
+        _make_statements_rows_adjusted(),
+        "aapl",
+    ).collect()
     assert df["symbol"].unique().to_list() == ["AAPL"]
 
 
@@ -527,17 +607,6 @@ def test_init_explicit_api_key_takes_precedence_over_env(monkeypatch):
     monkeypatch.setenv("TIINGO_API_KEY", "env-key")
     source = TiingoSource(api_key="explicit-key")
     assert source.api_key == "explicit-key"
-
-
-def test_init_as_reported_defaults_true():
-    # PEAD/SUE wants point-in-time announced numbers, not later restatements.
-    source = TiingoSource(api_key="k")
-    assert source._as_reported is True
-
-
-def test_init_as_reported_can_be_disabled():
-    source = TiingoSource(api_key="k", as_reported=False)
-    assert source._as_reported is False
 
 
 def test_supported_datasets(source):
@@ -752,40 +821,49 @@ def test_fetch_fundamentals_daily_empty_raises(source):
         source.fetch(Dataset.FUNDAMENTALS_DAILY, "AAPL", "2024-01-01", "2024-01-31")
 
 
+def _statements_side_effect(
+    *args: Any, **kwargs: Any,
+) -> list[dict[str, Any]]:
+    """Mock side_effect: return as-reported or adjusted payload depending on
+    the asReported kwarg the source sends."""
+    if kwargs.get("asReported") is True:
+        return _make_statements_rows_as_reported()
+    return _make_statements_rows_adjusted()
+
+
 def test_fetch_statements_lowercases_symbol_for_api(source):
     with patch.object(
-        source._client, "get_fundamentals_statements", return_value=_make_statements_rows()
+        source._client,
+        "get_fundamentals_statements",
+        side_effect=_statements_side_effect,
     ) as mock:
         source.fetch(
             Dataset.FUNDAMENTALS_STATEMENTS, "AAPL", "2022-01-01", "2024-12-31"
         ).collect()
-    assert mock.call_args.args[0] == "aapl"
+    # Both calls (asReported=True and asReported=False) lowercase the symbol
+    assert all(call.args[0] == "aapl" for call in mock.call_args_list)
 
 
-def test_fetch_statements_passes_as_reported_true_by_default(source):
+def test_fetch_statements_calls_both_as_reported_variants(source):
     with patch.object(
-        source._client, "get_fundamentals_statements", return_value=_make_statements_rows()
+        source._client,
+        "get_fundamentals_statements",
+        side_effect=_statements_side_effect,
     ) as mock:
         source.fetch(
             Dataset.FUNDAMENTALS_STATEMENTS, "AAPL", "2022-01-01", "2024-12-31"
         ).collect()
-    assert mock.call_args.kwargs["asReported"] is True
-
-
-def test_fetch_statements_passes_as_reported_false_when_disabled():
-    source = TiingoSource(api_key="k", as_reported=False)
-    with patch.object(
-        source._client, "get_fundamentals_statements", return_value=_make_statements_rows()
-    ) as mock:
-        source.fetch(
-            Dataset.FUNDAMENTALS_STATEMENTS, "AAPL", "2022-01-01", "2024-12-31"
-        ).collect()
-    assert mock.call_args.kwargs["asReported"] is False
+    # The dataset always fetches both variants — one call with asReported=True
+    # (point-in-time) and one with asReported=False (latest restated).
+    as_reported_flags = [call.kwargs["asReported"] for call in mock.call_args_list]
+    assert sorted(as_reported_flags) == [False, True]
 
 
 def test_fetch_statements_returns_normalized_frame(source):
     with patch.object(
-        source._client, "get_fundamentals_statements", return_value=_make_statements_rows()
+        source._client,
+        "get_fundamentals_statements",
+        side_effect=_statements_side_effect,
     ):
         df = source.fetch(
             Dataset.FUNDAMENTALS_STATEMENTS, "AAPL", "2022-01-01", "2024-12-31"
@@ -793,8 +871,10 @@ def test_fetch_statements_returns_normalized_frame(source):
     assert df.schema["date"] == pl.Int32
     assert df.schema["fiscal_year"] == pl.Int16
     assert df.schema["fiscal_quarter"] == pl.Int8
-    assert df.schema["eps_diluted"] == pl.Float32
-    assert df.schema["eps_basic"] == pl.Float32
+    assert df.schema["eps_diluted_as_reported"] == pl.Float32
+    assert df.schema["eps_basic_as_reported"] == pl.Float32
+    assert df.schema["eps_diluted_adjusted"] == pl.Float32
+    assert df.schema["eps_basic_adjusted"] == pl.Float32
     assert df.schema["revenue"] == pl.Float64
     assert df.height == 2
 

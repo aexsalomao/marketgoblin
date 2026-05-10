@@ -74,14 +74,18 @@ def make_fundamentals_daily_lf() -> pl.LazyFrame:
 
 def make_statements_lf() -> pl.LazyFrame:
     # Two filings landing in different months — exercises the monthly slice
-    # split for a quarterly-cadence dataset.
+    # split for a quarterly-cadence dataset. Carries all four EPS variants
+    # (as-reported / adjusted × diluted / basic) so the merged-variant shape
+    # round-trips correctly.
     return pl.DataFrame(
         {
             "date": pl.Series([20240801, 20240502], dtype=pl.Int32),
             "fiscal_year": pl.Series([2024, 2024], dtype=pl.Int16),
             "fiscal_quarter": pl.Series([3, 2], dtype=pl.Int8),
-            "eps_diluted": pl.Series([1.40, 1.53], dtype=pl.Float32),
-            "eps_basic": pl.Series([1.41, 1.54], dtype=pl.Float32),
+            "eps_diluted_as_reported": pl.Series([1.40, 1.53], dtype=pl.Float32),
+            "eps_basic_as_reported": pl.Series([1.41, 1.54], dtype=pl.Float32),
+            "eps_diluted_adjusted": pl.Series([1.42, 1.55], dtype=pl.Float32),
+            "eps_basic_adjusted": pl.Series([1.43, 1.56], dtype=pl.Float32),
             "revenue": pl.Series([85_777_000_000.0, 90_753_000_000.0], dtype=pl.Float64),
             "symbol": ["AAPL", "AAPL"],
         }
@@ -360,8 +364,10 @@ def test_load_statements_schema(storage):
     assert df.schema["date"] == pl.Int32
     assert df.schema["fiscal_year"] == pl.Int16
     assert df.schema["fiscal_quarter"] == pl.Int8
-    assert df.schema["eps_diluted"] == pl.Float32
-    assert df.schema["eps_basic"] == pl.Float32
+    assert df.schema["eps_diluted_as_reported"] == pl.Float32
+    assert df.schema["eps_basic_as_reported"] == pl.Float32
+    assert df.schema["eps_diluted_adjusted"] == pl.Float32
+    assert df.schema["eps_basic_adjusted"] == pl.Float32
     assert df.schema["revenue"] == pl.Float64
 
 

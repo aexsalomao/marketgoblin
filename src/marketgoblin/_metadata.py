@@ -249,7 +249,8 @@ def build_fundamentals_statements(
 
     Quarterly cadence — typically 1 row per slice (one filing per fiscal
     quarter, landing in the filing-date month). Captures fiscal-period
-    coverage and EPS bounds for sanity-checking against known outliers.
+    coverage and EPS bounds (as-reported diluted, which is the canonical
+    PEAD/SUE input) for sanity-checking against known outliers.
     """
     stats = chunk.select(
         [
@@ -258,8 +259,8 @@ def build_fundamentals_statements(
             pl.len().alias("row_count"),
             pl.col("fiscal_year").min().alias("fiscal_year_min"),
             pl.col("fiscal_year").max().alias("fiscal_year_max"),
-            pl.col("eps_diluted").min().alias("eps_diluted_min"),
-            pl.col("eps_diluted").max().alias("eps_diluted_max"),
+            pl.col("eps_diluted_as_reported").min().alias("eps_diluted_as_reported_min"),
+            pl.col("eps_diluted_as_reported").max().alias("eps_diluted_as_reported_max"),
         ]
     ).row(0, named=True)
 
@@ -275,8 +276,8 @@ def build_fundamentals_statements(
         "file_size_bytes": file_size_bytes,
         "fiscal_year_min": _safe_int(stats["fiscal_year_min"]),
         "fiscal_year_max": _safe_int(stats["fiscal_year_max"]),
-        "eps_diluted_min": _safe_float(stats["eps_diluted_min"]),
-        "eps_diluted_max": _safe_float(stats["eps_diluted_max"]),
+        "eps_diluted_as_reported_min": _safe_float(stats["eps_diluted_as_reported_min"]),
+        "eps_diluted_as_reported_max": _safe_float(stats["eps_diluted_as_reported_max"]),
     }
 
 

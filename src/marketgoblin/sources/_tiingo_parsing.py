@@ -202,10 +202,9 @@ def fundamentals_daily_rows_to_lf(
     )
 
 
-# Income-statement codes pulled from each Tiingo quarterly payload.
-# epsDil and epsBasic are the standard PEAD inputs; revenue is added because
-# it costs nothing extra (one HTTP call covers all codes) and unlocks
-# revenue-surprise SUE later.
+# Income-statement codes lifted from each Tiingo quarterly payload.
+# epsDil + epsBasic feed downstream SUE; revenue rides along because the
+# whole incomeStatement section ships in the same response.
 _INCOME_STATEMENT_CODES: tuple[str, ...] = ("epsDil", "epsBasic", "revenue")
 
 
@@ -219,13 +218,19 @@ def _index_data_codes(items: list[dict[str, Any]]) -> dict[str, Any]:
     return {item["dataCode"]: item.get("value") for item in items if "dataCode" in item}
 
 
-def _statement_payload_to_row(payload: dict[str, Any]) -> dict[str, Any]:
+def _statement_payload_to_row(
+    payload: dict[str, Any],
+    *,
+    suffix: str,
+) -> dict[str, Any]:
     """Flatten one quarterly Tiingo statement payload into a single dict.
 
     Tiingo emits the income statement as a nested list of ``{dataCode,
     value}`` pairs; we lift the codes we care about into named columns and
-    drop everything else. Returns a dict with the wire-schema column names
-    so it composes cleanly with ``pl.from_dicts(rows, schema=…)`` below.
+    drop everything else. ``suffix`` distinguishes the two endpoint variants
+    when the same payload shape is fetched twice (asReported=True vs False)
+    — values land in ``eps_diluted_<suffix>`` etc. so the eventual outer
+    join can pivot both into a single row per quarter.
     """
     income = payload.get("statementData", {}).get("incomeStatement", []) or []
     indexed = _index_data_codes(income)
@@ -233,44 +238,128 @@ def _statement_payload_to_row(payload: dict[str, Any]) -> dict[str, Any]:
         "date": payload.get("date"),  # Filing date (ISO string)
         "fiscal_year": coerce_int(payload.get("year")),
         "fiscal_quarter": coerce_int(payload.get("quarter")),
-        "eps_diluted": coerce_float(indexed.get("epsDil")),
-        "eps_basic": coerce_float(indexed.get("epsBasic")),
-        "revenue": coerce_float(indexed.get("revenue")),
+        f"eps_diluted_{suffix}": coerce_float(indexed.get("epsDil")),
+        f"eps_basic_{suffix}": coerce_float(indexed.get("epsBasic")),
+        # Revenue is the same number under both asReported variants
+        # (Tiingo doesn't restate top-line); we collect it from one side
+        # and let the join keep one column.
+        f"revenue_{suffix}": coerce_float(indexed.get("revenue")),
     }
 
 
-# Wire-level schema for statements from_dicts.
-_STATEMENTS_WIRE_SCHEMA: dict[str, pl.DataType] = {
-    "date": pl.String(),
-    "fiscal_year": pl.Int64(),
-    "fiscal_quarter": pl.Int64(),
-    "eps_diluted": pl.Float64(),
-    "eps_basic": pl.Float64(),
-    "revenue": pl.Float64(),
-}
+def _statements_wire_schema(suffix: str) -> dict[str, pl.DataType]:
+    """Wire-level schema for one variant's from_dicts call. Declared
+    explicitly so a missing field on a row materializes as a null column
+    instead of crashing the projection."""
+    return {
+        "date": pl.String(),
+        "fiscal_year": pl.Int64(),
+        "fiscal_quarter": pl.Int64(),
+        f"eps_diluted_{suffix}": pl.Float64(),
+        f"eps_basic_{suffix}": pl.Float64(),
+        f"revenue_{suffix}": pl.Float64(),
+    }
+
+
+_AS_REPORTED_SUFFIX: str = "as_reported"
+_ADJUSTED_SUFFIX: str = "adjusted"
+
+
+def _one_variant_to_lf(
+    rows: list[dict[str, Any]],
+    suffix: str,
+) -> pl.LazyFrame:
+    """One asReported variant's rows → typed LazyFrame, before merging."""
+    flattened = [_statement_payload_to_row(payload, suffix=suffix) for payload in rows]
+    return (
+        pl.from_dicts(flattened, schema=_statements_wire_schema(suffix))
+        .lazy()
+        .pipe(parse_tiingo_date_col)
+    )
 
 
 def statements_rows_to_lf(
-    rows: list[dict[str, Any]],
+    as_reported_rows: list[dict[str, Any]],
+    adjusted_rows: list[dict[str, Any]],
     symbol: str,
 ) -> pl.LazyFrame:
-    """Wrap Tiingo's quarterly-statements payload in a typed LazyFrame.
+    """Merge Tiingo's two statements variants into a single typed LazyFrame.
 
-    The ``date`` column carries the *filing date* (the day the report was
-    posted) — that's the field downstream consumers use to filter to
-    "strictly before t0" for SUE. Fiscal-period identity comes from
-    ``(fiscal_year, fiscal_quarter)``; quarter-end is not emitted because
-    Tiingo's payload doesn't carry the company's fiscal calendar and most
-    consumers don't need it. Raises ``ValueError`` on empty input.
+    Tiingo's ``/fundamentals/<ticker>/statements`` endpoint exposes
+    point-in-time announced values (``asReported=True``) and latest restated
+    values (``asReported=False``). PEAD/SUE wants both available in one frame
+    so the strategy layer can A/B the variant choice without re-fetching;
+    we issue one HTTP call per variant and outer-join on
+    ``(fiscal_year, fiscal_quarter)``.
+
+    The canonical ``date`` column is the as-reported filing date (what the
+    market saw at announcement). When the as-reported call returned no row
+    for a quarter that the adjusted call did surface, the adjusted call's
+    filing date (still meaningful — last restatement) is used as fallback.
+
+    Output columns: ``date`` (Date, filing date), ``fiscal_year`` (Int),
+    ``fiscal_quarter`` (Int), ``eps_diluted_as_reported``,
+    ``eps_basic_as_reported``, ``eps_diluted_adjusted``,
+    ``eps_basic_adjusted`` (Float), ``revenue`` (Float, taken from
+    as-reported when present), ``symbol`` (str).
+
+    Raises ``ValueError`` when both inputs are empty — a ticker with no
+    quarterly history at all is a non-transient upstream condition.
     """
-    if not rows:
+    if not as_reported_rows and not adjusted_rows:
         raise ValueError(f"No statements data returned for {symbol}")
-    flattened = [_statement_payload_to_row(payload) for payload in rows]
+
+    ar_lf = (
+        _one_variant_to_lf(as_reported_rows, _AS_REPORTED_SUFFIX)
+        if as_reported_rows
+        else _empty_variant_lf(_AS_REPORTED_SUFFIX)
+    )
+    adj_lf = (
+        _one_variant_to_lf(adjusted_rows, _ADJUSTED_SUFFIX)
+        if adjusted_rows
+        else _empty_variant_lf(_ADJUSTED_SUFFIX)
+    )
+
+    # Outer-join so quarters reported in one variant but not the other still
+    # surface (common: very old history is sometimes only in restated form).
+    merged = ar_lf.join(
+        adj_lf,
+        on=["fiscal_year", "fiscal_quarter"],
+        how="full",
+        suffix="_adj_join",
+        coalesce=True,
+    )
+    # Backfill date and revenue from whichever side has the value. As-reported
+    # wins on conflict — that's the announcement-time fact PEAD cares about.
     return (
-        pl.from_dicts(flattened, schema=_STATEMENTS_WIRE_SCHEMA)
-        .lazy()
-        .pipe(parse_tiingo_date_col)
+        merged.with_columns(
+            pl.coalesce("date", "date_adj_join").alias("date"),
+            pl.coalesce(
+                f"revenue_{_AS_REPORTED_SUFFIX}",
+                f"revenue_{_ADJUSTED_SUFFIX}",
+            ).alias("revenue"),
+        )
+        .drop("date_adj_join", f"revenue_{_AS_REPORTED_SUFFIX}", f"revenue_{_ADJUSTED_SUFFIX}")
         .with_columns(pl.lit(symbol.upper()).alias("symbol"))
+        .select(
+            "date",
+            "fiscal_year",
+            "fiscal_quarter",
+            f"eps_diluted_{_AS_REPORTED_SUFFIX}",
+            f"eps_basic_{_AS_REPORTED_SUFFIX}",
+            f"eps_diluted_{_ADJUSTED_SUFFIX}",
+            f"eps_basic_{_ADJUSTED_SUFFIX}",
+            "revenue",
+            "symbol",
+        )
+    )
+
+
+def _empty_variant_lf(suffix: str) -> pl.LazyFrame:
+    """Empty frame with the wire schema — used when one variant returned no
+    rows so the outer join still has both sides to operate on."""
+    return pl.from_dicts([], schema=_statements_wire_schema(suffix)).lazy().pipe(
+        parse_tiingo_date_col
     )
 
 

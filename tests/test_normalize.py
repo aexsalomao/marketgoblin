@@ -178,8 +178,10 @@ def make_raw_statements() -> pl.LazyFrame:
             "date": [date(2024, 8, 1), date(2024, 5, 2)],
             "fiscal_year": pl.Series([2024, 2024], dtype=pl.Int64),
             "fiscal_quarter": pl.Series([3, 2], dtype=pl.Int64),
-            "eps_diluted": pl.Series([1.40, 1.53], dtype=pl.Float64),
-            "eps_basic": pl.Series([1.41, 1.54], dtype=pl.Float64),
+            "eps_diluted_as_reported": pl.Series([1.40, 1.53], dtype=pl.Float64),
+            "eps_basic_as_reported": pl.Series([1.41, 1.54], dtype=pl.Float64),
+            "eps_diluted_adjusted": pl.Series([1.42, 1.55], dtype=pl.Float64),
+            "eps_basic_adjusted": pl.Series([1.43, 1.56], dtype=pl.Float64),
             "revenue": pl.Series([85_777_000_000.0, 90_753_000_000.0], dtype=pl.Float64),
             "symbol": ["AAPL", "AAPL"],
         }
@@ -191,8 +193,10 @@ def test_normalize_statements_dtypes():
     assert df.schema["date"] == pl.Int32
     assert df.schema["fiscal_year"] == pl.Int16
     assert df.schema["fiscal_quarter"] == pl.Int8
-    assert df.schema["eps_diluted"] == pl.Float32
-    assert df.schema["eps_basic"] == pl.Float32
+    assert df.schema["eps_diluted_as_reported"] == pl.Float32
+    assert df.schema["eps_basic_as_reported"] == pl.Float32
+    assert df.schema["eps_diluted_adjusted"] == pl.Float32
+    assert df.schema["eps_basic_adjusted"] == pl.Float32
     assert df.schema["revenue"] == pl.Float64
 
 

@@ -70,13 +70,7 @@ class TiingoSource(BaseSource):
 
     name = "tiingo"
 
-    def __init__(
-        self,
-        api_key: str | None = None,
-        *,
-        as_reported: bool = True,
-        **kwargs: Any,
-    ) -> None:
+    def __init__(self, api_key: str | None = None, **kwargs: Any) -> None:
         # Resolve from TIINGO_API_KEY before super() stores it. Without this,
         # callers who rely on the env var (the pattern the tiingo client itself
         # documents) end up with self.api_key=None, which silently breaks
@@ -86,10 +80,6 @@ class TiingoSource(BaseSource):
         super().__init__(api_key, **kwargs)
         config = {"api_key": api_key} if api_key else None
         self._client = TiingoClient(config)
-        # asReported=True returns the original announced numbers (the values
-        # the market saw at filing time); =False returns latest restated
-        # values. PEAD/SUE wants point-in-time, so True is the default.
-        self._as_reported = as_reported
 
     def _build_dispatch(self) -> dict[Dataset, Fetcher]:
         return {
@@ -182,15 +172,30 @@ class TiingoSource(BaseSource):
     def _fetch_fundamentals_statements(
         self, symbol: str, start: str, end: str
     ) -> pl.LazyFrame:
+        # Tiingo's statements endpoint exposes asReported as a request flag,
+        # not as separate columns in one response — to ship both variants in
+        # the same on-disk slice we issue both calls and merge in the parser.
+        # PEAD's SUE strategy A/Bs across all four EPS variants without
+        # re-fetching, so paying for two calls per ticker upfront is cheaper
+        # than re-fetching one variant on demand later.
         def do_fetch() -> pl.LazyFrame:
-            rows = self._client.get_fundamentals_statements(
+            as_reported_rows = self._client.get_fundamentals_statements(
                 symbol.lower(),
                 startDate=start,
                 endDate=end,
-                asReported=self._as_reported,
+                asReported=True,
                 fmt="json",
             )
-            return statements_rows_to_lf(rows, symbol).pipe(normalize_statements)
+            adjusted_rows = self._client.get_fundamentals_statements(
+                symbol.lower(),
+                startDate=start,
+                endDate=end,
+                asReported=False,
+                fmt="json",
+            )
+            return statements_rows_to_lf(
+                as_reported_rows, adjusted_rows, symbol
+            ).pipe(normalize_statements)
 
         return self._retry_fetch(do_fetch, symbol)
 
