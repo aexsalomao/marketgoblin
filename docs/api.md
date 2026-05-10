@@ -166,7 +166,15 @@ Transient failures are retried with exponential backoff (3 attempts, 1 s / 2 s d
 
 Backed by the official [tiingo](https://pypi.org/project/tiingo/) Python client. Supports `Dataset.OHLCV`, `Dataset.SHARES`, and `Dataset.DIVIDENDS`. Requires an API key (paid tier needed for `SHARES` and `fetch_classification`).
 
+The key can be supplied three ways, in order of precedence:
+
+1. Explicit `api_key=` argument to `MarketGoblin(...)`.
+2. `TIINGO_API_KEY` environment variable.
+3. A `TIINGO_API_KEY=...` line in a local `.env` file. `marketgoblin` auto-loads `.env` from the working directory or any parent at package import time. See `.env.example` at the repo root for the template.
+
 ```python
+# Either of these works once .env contains TIINGO_API_KEY:
+goblin = MarketGoblin(provider="tiingo", save_path="./data")
 goblin = MarketGoblin(provider="tiingo", api_key="<TIINGO_API_KEY>", save_path="./data")
 ```
 
