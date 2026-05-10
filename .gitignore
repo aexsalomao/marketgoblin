@@ -25,6 +25,11 @@ data/
 
 # Claude local settings (personal preferences, not shared)
 CLAUDE.local.md
+.claude/settings.local.json
+
+# Local smoke / scratch scripts that may contain API keys or one-off probes
+_smoke_*.py
+_scratch_*.py
 
 # Test coverage
 .coverage

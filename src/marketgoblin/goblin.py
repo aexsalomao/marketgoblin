@@ -18,6 +18,7 @@ from marketgoblin.classification import Classification
 from marketgoblin.datasets import Dataset
 from marketgoblin.sources.base import BaseSource
 from marketgoblin.sources.csv_source import CSVSource
+from marketgoblin.sources.tiingo import TiingoSource
 from marketgoblin.sources.yahoo import YahooSource
 from marketgoblin.storage.disk import DiskStorage
 from marketgoblin.ticker_metadata import TickerMetadata
@@ -27,6 +28,7 @@ logger = logging.getLogger(__name__)
 _SOURCES: dict[str, type[BaseSource]] = {
     "yahoo": YahooSource,
     "csv": CSVSource,
+    "tiingo": TiingoSource,
 }
 
 _DATE_FMT = "%Y-%m-%d"

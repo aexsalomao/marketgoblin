@@ -41,6 +41,9 @@ src/marketgoblin/
     sources/
         base.py           # BaseSource ABC + Fetcher type alias
         yahoo.py          # YahooSource — OHLCV + SHARES + DIVIDENDS via yfinance
+        _yahoo_parsing.py # Pure helpers behind YahooSource (info → TickerMetadata, etc.)
+        tiingo.py         # TiingoSource — OHLCV + SHARES + DIVIDENDS via tiingo.TiingoClient
+        _tiingo_parsing.py # Pure helpers behind TiingoSource (JSON → frames + dataclasses)
         csv_source.py     # CSVSource — OHLCV-only
     storage/
         disk.py           # DiskStorage — dataset-aware monthly .pq slices
@@ -51,6 +54,7 @@ tests/
     test_goblin.py
     test_csv_source.py
     test_yahoo.py         # YahooSource fetch tests (yfinance mocked)
+    test_tiingo.py        # TiingoSource fetch tests (TiingoClient + requests mocked)
 docs/                     # MkDocs source (index.md, api.md, contributing.md, changelog.md)
 example.py
 mkdocs.yml
@@ -73,7 +77,7 @@ class Dataset(StrEnum):
 ### `goblin.py` — `MarketGoblin`
 
 ```python
-_SOURCES: dict[str, type[BaseSource]] = {"yahoo": YahooSource, "csv": CSVSource}
+_SOURCES: dict[str, type[BaseSource]] = {"yahoo": YahooSource, "csv": CSVSource, "tiingo": TiingoSource}
 
 _validate_dates(start, end)              # bad format or start >= end → ValueError
 
@@ -159,6 +163,29 @@ class YahooSource(BaseSource):
 - `_retry_fetch` retries on transient errors with backoff (1 s, 2 s); `ValueError` (empty data) propagates immediately
 - Each fetcher calls the appropriate `normalize_*` before returning
 
+### `sources/tiingo.py` — `TiingoSource`
+
+```python
+class TiingoSource(BaseSource):
+    name = "tiingo"
+    def __init__(self, api_key=None, **kwargs)            # wraps tiingo.TiingoClient
+    def _fetch_ohlcv(self, symbol, start, end) -> pl.LazyFrame
+    def _fetch_shares(self, symbol, start, end) -> pl.LazyFrame
+    def _fetch_dividends(self, symbol, start, end) -> pl.LazyFrame
+    def fetch_metadata(self, symbol, *, fast=False) -> TickerMetadata
+    def fetch_classification(self, symbol) -> Classification
+    def _retry_fetch(self, fetch_fn, symbol) -> pl.LazyFrame
+```
+
+- OHLCV: one `client.get_ticker_price(symbol, startDate, endDate, fmt="json", frequency="daily")` call returns each trading day's raw OHLCV plus adjusted variants (`adjOpen`, `adjHigh`, `adjLow`, `adjClose`, `adjVolume`) and `divCash` / `splitFactor`. The two variants are split into the project's stacked tidy frame, sorted by `(date, is_adjusted)`.
+- Shares: Tiingo's daily Fundamentals endpoint has `marketCap` but no shares field. We join `client.get_ticker_price(...)` + `client.get_fundamentals_daily(...)` on date and derive `shares = round(marketCap / close)` per day.
+- Dividends: derived from the same prices endpoint as OHLCV — rows with `divCash > 0`.
+- `fetch_metadata`: merges `client.get_ticker_metadata` + latest row from `client.get_fundamentals_daily` (`marketCap`, `peRatio`) + latest close via `client.get_ticker_price` (used to derive `shares_outstanding`). `fast=True` skips both paid lookups.
+- `fetch_classification`: direct `requests.get` against `/tiingo/fundamentals/meta` (paid; not wrapped by the Python client). Sector / industry strings → slugified `SectorProfile` / `IndustryProfile` keys; constituent fields stay at dataclass defaults.
+- All Tiingo REST calls send the symbol lowercase; on-disk `symbol` columns are uppercase.
+- Pure parsing helpers (frame-builders, dataclass-builders, `requests.get` wrapper) live in `_tiingo_parsing.py` so the `TiingoSource` class stays a thin orchestrator.
+- `_retry_fetch` retries on transient errors with backoff (1 s, 2 s); `ValueError` (empty data) propagates immediately.
+
 ### `sources/csv_source.py` — `CSVSource`
 
 ```python
@@ -204,6 +231,11 @@ goblin.py
   ├── _normalize.parse_dates
   ├── sources.yahoo.YahooSource     ──→ _normalize.normalize_ohlcv, normalize_shares, normalize_dividends
   │                                 ──→ sources.base.BaseSource, Fetcher
+  │                                 ──→ sources._yahoo_parsing (build_ticker_metadata, fetch_sector_profile, ...)
+  │                                 ──→ datasets.Dataset
+  ├── sources.tiingo.TiingoSource   ──→ _normalize.normalize_ohlcv, normalize_shares, normalize_dividends
+  │                                 ──→ sources.base.BaseSource, Fetcher
+  │                                 ──→ sources._tiingo_parsing (prices_rows_to_stacked_ohlcv, build_tiingo_metadata, ...)
   │                                 ──→ datasets.Dataset
   ├── sources.csv_source.CSVSource  ──→ _normalize.normalize_ohlcv
   │                                 ──→ sources.base.BaseSource, Fetcher

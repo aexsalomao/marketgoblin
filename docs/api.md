@@ -16,9 +16,9 @@ Dataset.DIVIDENDS  # "dividends"
 
 | Member | Columns | Providers |
 |---|---|---|
-| `Dataset.OHLCV` | `date` (int32 YYYYMMDD), `open` / `high` / `low` / `close` (float32), `volume` (int64), `is_adjusted` (bool), `symbol` | `yahoo`, `csv` |
-| `Dataset.SHARES` | `date` (int32 YYYYMMDD), `shares` (int64), `symbol` | `yahoo` |
-| `Dataset.DIVIDENDS` | `date` (int32 YYYYMMDD), `dividend` (float32), `symbol` | `yahoo` |
+| `Dataset.OHLCV` | `date` (int32 YYYYMMDD), `open` / `high` / `low` / `close` (float32), `volume` (int64), `is_adjusted` (bool), `symbol` | `yahoo`, `tiingo`, `csv` |
+| `Dataset.SHARES` | `date` (int32 YYYYMMDD), `shares` (int64), `symbol` | `yahoo`, `tiingo` |
+| `Dataset.DIVIDENDS` | `date` (int32 YYYYMMDD), `dividend` (float32), `symbol` | `yahoo`, `tiingo` |
 
 OHLCV is returned as a tidy stacked frame: each trading day appears twice — one row with `is_adjusted=True` (split/dividend-adjusted prices) and one with `is_adjusted=False` (raw prices). Filter downstream to pick a variant:
 
@@ -54,8 +54,8 @@ MarketGoblin(
 
 | Parameter | Description |
 |---|---|
-| `provider` | Data source name: `"yahoo"` or `"csv"` |
-| `api_key` | API key for providers that require one (not needed for Yahoo) |
+| `provider` | Data source name: `"yahoo"`, `"tiingo"`, or `"csv"` |
+| `api_key` | API key for providers that require one (Tiingo requires one; Yahoo does not) |
 | `save_path` | Root directory for disk persistence. Required for `load()`. |
 | `**source_kwargs` | Extra keyword arguments forwarded to the source constructor (e.g. `data_dir` for `CSVSource`) |
 
@@ -67,7 +67,7 @@ MarketGoblin(
 supported_datasets: frozenset[Dataset]
 ```
 
-Datasets that the configured provider can fetch. For `"yahoo"`:
+Datasets that the configured provider can fetch. For `"yahoo"` and `"tiingo"`:
 `{Dataset.OHLCV, Dataset.SHARES, Dataset.DIVIDENDS}`. For `"csv"`: `{Dataset.OHLCV}`.
 
 ### Methods
@@ -159,6 +159,24 @@ Backed by [yfinance](https://github.com/ranaroussi/yfinance). Supports `Dataset.
 - **DIVIDENDS:** `yf.Ticker(symbol).dividends` — full history, then filtered to the requested `[start, end]` range.
 
 Transient failures are retried with exponential backoff (3 attempts, 1 s / 2 s delays). Empty-data `ValueError`s propagate immediately.
+
+---
+
+## `TiingoSource`
+
+Backed by the official [tiingo](https://pypi.org/project/tiingo/) Python client. Supports `Dataset.OHLCV`, `Dataset.SHARES`, and `Dataset.DIVIDENDS`. Requires an API key (paid tier needed for `SHARES` and `fetch_classification`).
+
+```python
+goblin = MarketGoblin(provider="tiingo", api_key="<TIINGO_API_KEY>", save_path="./data")
+```
+
+- **OHLCV:** one `client.get_ticker_price(...)` call returns each trading day's raw OHLCV plus adjusted variants (`adjOpen`, `adjHigh`, `adjLow`, `adjClose`, `adjVolume`) and a `divCash` field. The two variants are split into the project's tidy stacked frame (one row per `(date, is_adjusted)`).
+- **SHARES:** Tiingo's daily Fundamentals endpoint exposes `marketCap` but no shares field. We join `client.get_ticker_price(...)` and `client.get_fundamentals_daily(...)` on date and derive `shares = round(marketCap / close)` — one row per trading day.
+- **DIVIDENDS:** derived from the same prices endpoint as OHLCV — rows with `divCash > 0` become dividend events.
+- **Metadata:** `client.get_ticker_metadata(...)` for name/exchange/description/first-trade-date; `client.get_fundamentals_daily(...)` (last 7 days) adds `marketCap` and `peRatio`; one extra `client.get_ticker_price(...)` lookup for the latest close lets us derive `shares_outstanding`. `fetch_metadata(symbol, fast=True)` skips both paid lookups.
+- **Classification:** direct GET against `/tiingo/fundamentals/meta` (paid; not wrapped by the Python client). Sector / industry strings are mapped to slugs (e.g. `"Information Technology"` → `"information-technology"`); constituent fields (`top_companies`, `etf_symbol`) stay at their dataclass defaults — Tiingo doesn't expose them.
+
+Transient failures are retried with exponential backoff (3 attempts, 1 s / 2 s delays). Empty-data `ValueError`s propagate immediately. The Tiingo REST API expects lowercase tickers in URL/query params; on-disk `symbol` columns are uppercase, matching the rest of the platform.
 
 ---
 
