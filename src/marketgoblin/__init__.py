@@ -1,5 +1,7 @@
 """marketgoblin — market data platform for downloading and storing financial data."""
 
+from importlib.metadata import version
+
 from marketgoblin import _bootstrap as _bootstrap  # noqa: F401 — runs load_dotenv()
 from marketgoblin.classification import Classification, IndustryProfile, SectorProfile
 from marketgoblin.datasets import Dataset
@@ -15,7 +17,9 @@ from marketgoblin.sector_indices import (
 )
 from marketgoblin.ticker_metadata import TickerMetadata
 
-__version__ = "0.5.1"
+# Single source of truth: read from installed package metadata (pyproject
+# version) so the string can't drift from the released artifact.
+__version__ = version("marketgoblin")
 __all__ = [
     "Classification",
     "Dataset",
