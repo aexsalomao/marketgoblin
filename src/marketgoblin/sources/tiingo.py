@@ -175,29 +175,32 @@ class TiingoSource(BaseSource):
         # Tiingo's statements endpoint exposes asReported as a request flag,
         # not as separate columns in one response — to ship both variants in
         # the same on-disk slice we issue both calls and merge in the parser.
-        # PEAD's SUE strategy A/Bs across all four EPS variants without
-        # re-fetching, so paying for two calls per ticker upfront is cheaper
-        # than re-fetching one variant on demand later.
-        def do_fetch() -> pl.LazyFrame:
-            as_reported_rows = self._client.get_fundamentals_statements(
+        # Each call is wrapped in its own _retry_fetch so a transient failure
+        # on the second call doesn't replay the first (network-wise harmless,
+        # but doubles billed quota and obscures rate-limit signals).
+        def fetch_as_reported() -> list[dict[str, Any]]:
+            return self._client.get_fundamentals_statements(  # type: ignore[no-any-return]
                 symbol.lower(),
                 startDate=start,
                 endDate=end,
                 asReported=True,
                 fmt="json",
             )
-            adjusted_rows = self._client.get_fundamentals_statements(
+
+        def fetch_adjusted() -> list[dict[str, Any]]:
+            return self._client.get_fundamentals_statements(  # type: ignore[no-any-return]
                 symbol.lower(),
                 startDate=start,
                 endDate=end,
                 asReported=False,
                 fmt="json",
             )
-            return statements_rows_to_lf(
-                as_reported_rows, adjusted_rows, symbol
-            ).pipe(normalize_statements)
 
-        return self._retry_fetch(do_fetch, symbol)
+        as_reported_rows = self._retry_fetch(fetch_as_reported, symbol)
+        adjusted_rows = self._retry_fetch(fetch_adjusted, symbol)
+        return statements_rows_to_lf(
+            as_reported_rows, adjusted_rows, symbol
+        ).pipe(normalize_statements)
 
     def fetch_metadata(self, symbol: str, *, fast: bool = False) -> TickerMetadata:
         """Build a unified TickerMetadata from Tiingo's metadata + daily fundamentals.
