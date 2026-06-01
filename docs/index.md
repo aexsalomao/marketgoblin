@@ -200,6 +200,6 @@ pip install marketgoblin
 | `Dataset.DIVIDENDS` | `yahoo`, `tiingo` | Cash dividend events — typically quarterly. Filtered to the requested `[start, end]` range. |
 | `Dataset.SPLITS` | `tiingo` | Forward/reverse split events as a `split_factor` multiplier. |
 | `Dataset.FUNDAMENTALS_DAILY` | `tiingo` | Daily market cap, enterprise value, and valuation ratios. Paid endpoint. |
-| `Dataset.FUNDAMENTALS_STATEMENTS` | `tiingo` | Quarterly EPS (diluted/basic × as-reported/adjusted) and revenue. Paid endpoint. |
+| `Dataset.FUNDAMENTALS_STATEMENTS` | `tiingo` | Full quarterly income statement, balance sheet, cash flow & overview — every line item in both as-reported and restated variants. Paid endpoint. |
 
 See [Providers & Capabilities](providers.md) for the full matrix.

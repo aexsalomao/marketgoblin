@@ -249,8 +249,10 @@ def build_fundamentals_statements(
 
     Quarterly cadence — typically 1 row per slice (one filing per fiscal
     quarter, landing in the filing-date month). Captures fiscal-period
-    coverage and EPS bounds (as-reported diluted, which is the canonical
-    PEAD/SUE input) for sanity-checking against known outliers.
+    coverage plus as-reported EPS, revenue and net-income bounds (the
+    headline figures driving PEAD/SUE) for sanity-checking against known
+    outliers. The slice now carries the full statement surface; bounds stay
+    focused on these few anchors rather than every line item.
     """
     stats = chunk.select(
         [
@@ -261,6 +263,10 @@ def build_fundamentals_statements(
             pl.col("fiscal_year").max().alias("fiscal_year_max"),
             pl.col("eps_diluted_as_reported").min().alias("eps_diluted_as_reported_min"),
             pl.col("eps_diluted_as_reported").max().alias("eps_diluted_as_reported_max"),
+            pl.col("revenue_as_reported").min().alias("revenue_as_reported_min"),
+            pl.col("revenue_as_reported").max().alias("revenue_as_reported_max"),
+            pl.col("net_income_as_reported").min().alias("net_income_as_reported_min"),
+            pl.col("net_income_as_reported").max().alias("net_income_as_reported_max"),
         ]
     ).row(0, named=True)
 
@@ -278,6 +284,10 @@ def build_fundamentals_statements(
         "fiscal_year_max": _safe_int(stats["fiscal_year_max"]),
         "eps_diluted_as_reported_min": _safe_float(stats["eps_diluted_as_reported_min"]),
         "eps_diluted_as_reported_max": _safe_float(stats["eps_diluted_as_reported_max"]),
+        "revenue_as_reported_min": _safe_float(stats["revenue_as_reported_min"]),
+        "revenue_as_reported_max": _safe_float(stats["revenue_as_reported_max"]),
+        "net_income_as_reported_min": _safe_float(stats["net_income_as_reported_min"]),
+        "net_income_as_reported_max": _safe_float(stats["net_income_as_reported_max"]),
     }
 
 

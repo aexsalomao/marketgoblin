@@ -114,7 +114,7 @@ MarketGoblin(provider: str, api_key: str | None = None, save_path: str | Path | 
 | `Dataset.DIVIDENDS` | `yahoo`, `tiingo` | `date` (int32), `dividend` (float32), `symbol` |
 | `Dataset.SPLITS` | `tiingo` | `date` (int32), `split_factor` (float32), `symbol` |
 | `Dataset.FUNDAMENTALS_DAILY` | `tiingo` | `date` (int32), `market_cap` / `enterprise_val` (int64), `pe_ratio` / `pb_ratio` / `trailing_peg_1y` (float32), `symbol` |
-| `Dataset.FUNDAMENTALS_STATEMENTS` | `tiingo` | `date` (int32), `fiscal_year` (int16), `fiscal_quarter` (int8), `eps_*` (float32), `revenue` (float64), `symbol` |
+| `Dataset.FUNDAMENTALS_STATEMENTS` | `tiingo` | `date` (int32), `fiscal_year` (int16), `fiscal_quarter` (int8), ~76 income/balance/cash-flow/overview line items each as `<field>_{as_reported,adjusted}` (float64 for $/share-counts, float32 for per-share & ratios), `symbol` |
 
 OHLCV is returned as a tidy stacked frame: each trading day appears twice (`is_adjusted=True` and `is_adjusted=False`). Filter downstream (`.filter(pl.col("is_adjusted"))`) to pick a variant. Adjusted Open/High/Low are derived locally from the `Adj Close / Close` ratio — verified to match yfinance's `auto_adjust=True` output exactly while halving network calls.
 

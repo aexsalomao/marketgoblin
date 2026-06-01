@@ -1,4 +1,5 @@
 import json
+from datetime import date
 
 import polars as pl
 import pytest
@@ -77,19 +78,21 @@ def make_fundamentals_daily_chunk() -> pl.DataFrame:
     )
 
 
-def make_statements_chunk() -> pl.DataFrame:
-    return pl.DataFrame(
-        {
-            "date": pl.Series([20240801, 20240502], dtype=pl.Int32),
-            "fiscal_year": pl.Series([2024, 2024], dtype=pl.Int16),
-            "fiscal_quarter": pl.Series([3, 2], dtype=pl.Int8),
-            "eps_diluted_as_reported": pl.Series([1.40, 1.53], dtype=pl.Float32),
-            "eps_basic_as_reported": pl.Series([1.41, 1.54], dtype=pl.Float32),
-            "eps_diluted_adjusted": pl.Series([1.42, 1.55], dtype=pl.Float32),
-            "eps_basic_adjusted": pl.Series([1.43, 1.56], dtype=pl.Float32),
-            "revenue": pl.Series([85_777_000_000.0, 90_753_000_000.0], dtype=pl.Float64),
-            "symbol": ["AAPL", "AAPL"],
-        }
+@pytest.fixture
+def statements_chunk(make_statements_frame) -> pl.DataFrame:
+    # Normalized on-disk slice with the three as-reported anchors the metadata
+    # builder reads (eps_diluted / revenue / net_income).
+    return make_statements_frame(
+        dates=[date(2024, 8, 1), date(2024, 5, 2)],
+        fiscal_years=[2024, 2024],
+        fiscal_quarters=[3, 2],
+        anchors={
+            "eps_diluted_as_reported": [1.40, 1.53],
+            "revenue_as_reported": [85_777_000_000.0, 90_753_000_000.0],
+            "net_income_as_reported": [21_448_000_000.0, 23_636_000_000.0],
+        },
+        on_disk=True,
+        lazy=False,
     )
 
 
@@ -347,8 +350,8 @@ def test_build_fundamentals_daily_handles_null_metrics(fake_pq):
     assert meta["pe_ratio_min"] is None
 
 
-def test_build_fundamentals_statements_has_all_keys(fake_pq):
-    meta = build_fundamentals_statements(make_statements_chunk(), "tiingo", "AAPL", "2024-08", 0)
+def test_build_fundamentals_statements_has_all_keys(fake_pq, statements_chunk):
+    meta = build_fundamentals_statements(statements_chunk, "tiingo", "AAPL", "2024-08", 0)
     expected = {
         "symbol",
         "provider",
@@ -363,12 +366,16 @@ def test_build_fundamentals_statements_has_all_keys(fake_pq):
         "fiscal_year_max",
         "eps_diluted_as_reported_min",
         "eps_diluted_as_reported_max",
+        "revenue_as_reported_min",
+        "revenue_as_reported_max",
+        "net_income_as_reported_min",
+        "net_income_as_reported_max",
     }
     assert set(meta.keys()) == expected
 
 
-def test_build_fundamentals_statements_stats(fake_pq):
-    meta = build_fundamentals_statements(make_statements_chunk(), "tiingo", "AAPL", "2024-08", 0)
+def test_build_fundamentals_statements_stats(fake_pq, statements_chunk):
+    meta = build_fundamentals_statements(statements_chunk, "tiingo", "AAPL", "2024-08", 0)
     assert meta["symbol"] == "AAPL"
     assert meta["row_count"] == 2
     assert meta["start_date"] == 20240502
@@ -377,21 +384,22 @@ def test_build_fundamentals_statements_stats(fake_pq):
     assert meta["fiscal_year_max"] == 2024
     assert meta["eps_diluted_as_reported_min"] == pytest.approx(1.40, rel=1e-3)
     assert meta["eps_diluted_as_reported_max"] == pytest.approx(1.53, rel=1e-3)
+    assert meta["revenue_as_reported_min"] == pytest.approx(85_777_000_000.0)
+    assert meta["net_income_as_reported_max"] == pytest.approx(23_636_000_000.0)
 
 
-def test_build_fundamentals_statements_handles_null_eps(fake_pq):
-    chunk = pl.DataFrame(
-        {
-            "date": pl.Series([20240801], dtype=pl.Int32),
-            "fiscal_year": pl.Series([2024], dtype=pl.Int16),
-            "fiscal_quarter": pl.Series([3], dtype=pl.Int8),
-            "eps_diluted_as_reported": pl.Series([None], dtype=pl.Float32),
-            "eps_basic_as_reported": pl.Series([None], dtype=pl.Float32),
-            "eps_diluted_adjusted": pl.Series([None], dtype=pl.Float32),
-            "eps_basic_adjusted": pl.Series([None], dtype=pl.Float32),
-            "revenue": pl.Series([85_777_000_000.0], dtype=pl.Float64),
-            "symbol": ["AAPL"],
-        }
+def test_build_fundamentals_statements_handles_null_eps(fake_pq, make_statements_frame):
+    chunk = make_statements_frame(
+        dates=[date(2024, 8, 1)],
+        fiscal_years=[2024],
+        fiscal_quarters=[3],
+        anchors={
+            "eps_diluted_as_reported": [None],
+            "revenue_as_reported": [85_777_000_000.0],
+            "net_income_as_reported": [21_448_000_000.0],
+        },
+        on_disk=True,
+        lazy=False,
     )
     meta = build_fundamentals_statements(chunk, "tiingo", "AAPL", "2024-08", 0)
     assert meta["eps_diluted_as_reported_min"] is None

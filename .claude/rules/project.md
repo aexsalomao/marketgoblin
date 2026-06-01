@@ -112,7 +112,7 @@ def normalize_shares(lf)    -> pl.LazyFrame   # → int64 shares, int32 YYYYMMDD
 def normalize_dividends(lf) -> pl.LazyFrame   # → float32 dividend, int32 YYYYMMDD date
 def normalize_splits(lf)    -> pl.LazyFrame   # → float32 split_factor, int32 YYYYMMDD date
 def normalize_fundamentals_daily(lf) -> pl.LazyFrame  # → int64 market_cap/enterprise_val, float32 ratios, int32 YYYYMMDD date
-def normalize_statements(lf) -> pl.LazyFrame  # → int16 fiscal_year, int8 fiscal_quarter, float32 EPS, float64 revenue, int32 YYYYMMDD date
+def normalize_statements(lf) -> pl.LazyFrame  # → int16 fiscal_year, int8 fiscal_quarter, int32 YYYYMMDD date, + every STATEMENT_FIELDS line item × {as_reported, adjusted} (float64 for $/share-counts, float32 for per-share/ratios). STATEMENT_FIELDS is the single source of truth for the statements on-disk schema.
 def parse_dates(lf)         -> pl.LazyFrame   # → int32 YYYYMMDD → pl.Date
 ```
 
@@ -135,7 +135,7 @@ def write(metadata, path) -> None  # atomic via .tmp rename
 `build_dividends()` computes row_count, date range, dividend min/max/total — no missing-days analysis (dividends are event-driven).
 `build_splits()` computes row_count, date range, split_factor min/max — no missing-days analysis (splits are event-driven and rare).
 `build_fundamentals_daily()` computes row_count, date range, market_cap min/max, pe_ratio min/max — no missing-days analysis (Tiingo's daily fundamentals occasionally drop bars around corporate actions, not worth alarming on).
-`build_fundamentals_statements()` computes row_count, date range, fiscal_year and eps_diluted min/max — quarterly cadence so the slice typically holds one row.
+`build_fundamentals_statements()` computes row_count, date range, fiscal_year min/max, and as-reported eps_diluted / revenue / net_income min/max — quarterly cadence so the slice typically holds one row.
 All take `file_size_bytes: int` (caller reads `path.stat().st_size` after the atomic write).
 
 ### `sources/base.py` — `BaseSource`
@@ -195,7 +195,7 @@ class TiingoSource(BaseSource):
 - Dividends: derived from the same prices endpoint as OHLCV — rows with `divCash > 0`.
 - Splits: derived from the same prices endpoint as OHLCV — rows with `splitFactor != 1.0`.
 - Fundamentals daily: one `client.get_fundamentals_daily(...)` call returns per-trading-day `marketCap`, `enterpriseVal`, `peRatio`, `pbRatio`, `trailingPEG1Y`. Renamed to snake_case, missing fields surface as null. Paid endpoint.
-- Fundamentals statements: one `client.get_fundamentals_statements(..., asReported=…)` call returns nested per-quarter payloads; the parser flattens `incomeStatement` codes (`epsDil`, `epsBasic`, `revenue`) into named columns. Filing date is the canonical `date`. The `as_reported` kw-only constructor flag (default True) toggles point-in-time vs latest-restated. Paid endpoint.
+- Fundamentals statements: two `client.get_fundamentals_statements(..., asReported=True/False)` calls return nested per-quarter payloads; the parser flattens all four sections (`incomeStatement`, `balanceSheet`, `cashFlow`, `overview`) into named columns and outer-joins the two variants on `(fiscal_year, fiscal_quarter)`. The Tiingo dataCode→column map (`_TIINGO_STATEMENT_CODES`) is guarded at import against `_normalize.STATEMENT_FIELDS` (single source of truth). Note Tiingo's basic-EPS code is `eps`, not `epsBasic`. Filing date is the canonical `date`. Paid endpoint.
 - `fetch_metadata`: merges `client.get_ticker_metadata` + latest row from `client.get_fundamentals_daily` (`marketCap`, `peRatio`) + latest close via `client.get_ticker_price` (used to derive `shares_outstanding`). `fast=True` skips both paid lookups.
 - `fetch_classification`: direct `requests.get` against `/tiingo/fundamentals/meta` (paid; not wrapped by the Python client). Sector / industry strings → slugified `SectorProfile` / `IndustryProfile` keys; constituent fields stay at dataclass defaults.
 - All Tiingo REST calls send the symbol lowercase; on-disk `symbol` columns are uppercase.

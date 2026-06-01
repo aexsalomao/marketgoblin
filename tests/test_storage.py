@@ -70,24 +70,22 @@ def make_fundamentals_daily_lf() -> pl.LazyFrame:
     ).lazy()
 
 
-def make_statements_lf() -> pl.LazyFrame:
+@pytest.fixture
+def statements_lf(make_statements_frame) -> pl.LazyFrame:
     # Two filings landing in different months — exercises the monthly slice
-    # split for a quarterly-cadence dataset. Carries all four EPS variants
-    # (as-reported / adjusted × diluted / basic) so the merged-variant shape
-    # round-trips correctly.
-    return pl.DataFrame(
-        {
-            "date": pl.Series([20240801, 20240502], dtype=pl.Int32),
-            "fiscal_year": pl.Series([2024, 2024], dtype=pl.Int16),
-            "fiscal_quarter": pl.Series([3, 2], dtype=pl.Int8),
-            "eps_diluted_as_reported": pl.Series([1.40, 1.53], dtype=pl.Float32),
-            "eps_basic_as_reported": pl.Series([1.41, 1.54], dtype=pl.Float32),
-            "eps_diluted_adjusted": pl.Series([1.42, 1.55], dtype=pl.Float32),
-            "eps_basic_adjusted": pl.Series([1.43, 1.56], dtype=pl.Float32),
-            "revenue": pl.Series([85_777_000_000.0, 90_753_000_000.0], dtype=pl.Float64),
-            "symbol": ["AAPL", "AAPL"],
-        }
-    ).lazy()
+    # split for a quarterly-cadence dataset. Carries every statement field in
+    # both variants so the full merged-variant shape round-trips correctly.
+    return make_statements_frame(
+        dates=[date(2024, 8, 1), date(2024, 5, 2)],
+        fiscal_years=[2024, 2024],
+        fiscal_quarters=[3, 2],
+        anchors={
+            "eps_diluted_as_reported": [1.40, 1.53],
+            "revenue_as_reported": [85_777e6, 90_753e6],
+            "net_income_as_reported": [21_448e6, 23_636e6],
+        },
+        on_disk=True,
+    )
 
 
 @pytest.fixture
@@ -325,29 +323,29 @@ def test_load_fundamentals_daily_parse_dates(storage):
     assert df["date"][0] == date(2024, 1, 2)
 
 
-def test_save_statements_creates_pq_files(storage, tmp_path):
-    storage.save("tiingo", "AAPL", Dataset.FUNDAMENTALS_STATEMENTS, make_statements_lf())
+def test_save_statements_creates_pq_files(storage, tmp_path, statements_lf):
+    storage.save("tiingo", "AAPL", Dataset.FUNDAMENTALS_STATEMENTS, statements_lf)
     base = tmp_path / "tiingo" / "fundamentals_statements" / "AAPL"
     assert (base / "AAPL_2024-05.pq").exists()
     assert (base / "AAPL_2024-08.pq").exists()
 
 
-def test_save_statements_creates_sidecars(storage, tmp_path):
-    storage.save("tiingo", "AAPL", Dataset.FUNDAMENTALS_STATEMENTS, make_statements_lf())
+def test_save_statements_creates_sidecars(storage, tmp_path, statements_lf):
+    storage.save("tiingo", "AAPL", Dataset.FUNDAMENTALS_STATEMENTS, statements_lf)
     sidecar = tmp_path / "tiingo" / "fundamentals_statements" / "AAPL" / "AAPL_2024-05.json"
     assert sidecar.exists()
 
 
-def test_load_statements_row_count(storage):
-    storage.save("tiingo", "AAPL", Dataset.FUNDAMENTALS_STATEMENTS, make_statements_lf())
+def test_load_statements_row_count(storage, statements_lf):
+    storage.save("tiingo", "AAPL", Dataset.FUNDAMENTALS_STATEMENTS, statements_lf)
     df = storage.load(
         "tiingo", "AAPL", Dataset.FUNDAMENTALS_STATEMENTS, "2024-01-01", "2024-12-31"
     ).collect()
     assert len(df) == 2
 
 
-def test_load_statements_schema(storage):
-    storage.save("tiingo", "AAPL", Dataset.FUNDAMENTALS_STATEMENTS, make_statements_lf())
+def test_load_statements_schema(storage, statements_lf):
+    storage.save("tiingo", "AAPL", Dataset.FUNDAMENTALS_STATEMENTS, statements_lf)
     df = storage.load(
         "tiingo", "AAPL", Dataset.FUNDAMENTALS_STATEMENTS, "2024-01-01", "2024-12-31"
     ).collect()
@@ -358,11 +356,12 @@ def test_load_statements_schema(storage):
     assert df.schema["eps_basic_as_reported"] == pl.Float32
     assert df.schema["eps_diluted_adjusted"] == pl.Float32
     assert df.schema["eps_basic_adjusted"] == pl.Float32
-    assert df.schema["revenue"] == pl.Float64
+    assert df.schema["revenue_as_reported"] == pl.Float64
+    assert df.schema["total_assets_adjusted"] == pl.Float64
 
 
-def test_load_statements_parse_dates(storage):
-    storage.save("tiingo", "AAPL", Dataset.FUNDAMENTALS_STATEMENTS, make_statements_lf())
+def test_load_statements_parse_dates(storage, statements_lf):
+    storage.save("tiingo", "AAPL", Dataset.FUNDAMENTALS_STATEMENTS, statements_lf)
     df = storage.load(
         "tiingo",
         "AAPL",

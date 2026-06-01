@@ -76,27 +76,126 @@ def normalize_fundamentals_daily(lf: pl.LazyFrame) -> pl.LazyFrame:
     )
 
 
-def normalize_statements(lf: pl.LazyFrame) -> pl.LazyFrame:
-    """Cast quarterly-statements frame to the on-disk schema.
+# --- Quarterly statements on-disk schema ---------------------------------
+# Every line item is stored in two variants — as-reported (point-in-time, what
+# the market saw at filing) and restated (adjusted) — written as
+# ``<name>_as_reported`` / ``<name>_adjusted``. This registry is the single
+# source of truth for the statements column names, dtypes and order; the Tiingo
+# parser (the only producer of this dataset) maps its dataCodes onto these
+# names and is guarded against drift at import time.
+STATEMENT_VARIANTS: tuple[str, str] = ("as_reported", "adjusted")
 
-    Carries four EPS columns — diluted/basic × as-reported/adjusted — so
-    downstream PEAD/SUE consumers can swap variants without re-fetching.
-    ``date`` is the filing date (cast to int32 YYYYMMDD per project
-    convention; ``parse_dates`` recovers ``pl.Date`` on load). Revenue
-    stays float64 because large-cap quarterly revenue (1e11+) overflows
-    float32's safe-integer range. EPS columns are float32 — values rarely
-    exceed ±100 and the precision loss is below reporting granularity.
+# (base name, dtype). Dollar line items and absolute share counts are float64 —
+# large-cap quarterly figures (revenue/assets 1e11+, shares ~1e10) exceed
+# float32's exact-integer range (±1.6e7); per-share figures and ratios are
+# float32, where values rarely exceed ±100 and precision loss sits below
+# reporting granularity.
+_F64 = pl.Float64()
+_F32 = pl.Float32()
+STATEMENT_FIELDS: tuple[tuple[str, pl.DataType], ...] = (
+    # income statement
+    ("revenue", _F64),
+    ("cost_of_revenue", _F64),
+    ("gross_profit", _F64),
+    ("operating_expenses", _F64),
+    ("sga", _F64),
+    ("rnd", _F64),
+    ("operating_income", _F64),
+    ("ebit", _F64),
+    ("ebitda", _F64),
+    ("ebt", _F64),
+    ("interest_expense", _F64),
+    ("tax_expense", _F64),
+    ("net_income", _F64),
+    ("net_income_common_stock", _F64),
+    ("net_income_disc_ops", _F64),
+    ("consolidated_income", _F64),
+    ("non_controlling_interests", _F64),
+    ("preferred_dividends", _F64),
+    ("eps_basic", _F32),
+    ("eps_diluted", _F32),
+    ("weighted_avg_shares", _F64),
+    ("weighted_avg_shares_diluted", _F64),
+    # balance sheet
+    ("cash_and_eq", _F64),
+    ("accounts_receivable", _F64),
+    ("inventory", _F64),
+    ("investments_current", _F64),
+    ("assets_current", _F64),
+    ("ppe", _F64),
+    ("investments", _F64),
+    ("investments_non_current", _F64),
+    ("intangibles", _F64),
+    ("tax_assets", _F64),
+    ("assets_non_current", _F64),
+    ("total_assets", _F64),
+    ("accounts_payable", _F64),
+    ("debt_current", _F64),
+    ("deferred_revenue", _F64),
+    ("liabilities_current", _F64),
+    ("debt_non_current", _F64),
+    ("liabilities_non_current", _F64),
+    ("tax_liabilities", _F64),
+    ("deposits", _F64),
+    ("total_liabilities", _F64),
+    ("total_debt", _F64),
+    ("equity", _F64),
+    ("retained_earnings", _F64),
+    ("accumulated_oci", _F64),
+    ("shares_basic", _F64),
+    # cash flow
+    ("net_cash_ops", _F64),
+    ("net_cash_investing", _F64),
+    ("net_cash_financing", _F64),
+    ("net_cash_flow", _F64),
+    ("fx_effect_on_cash", _F64),
+    ("capex", _F64),
+    ("free_cash_flow", _F64),
+    ("depreciation_amortization", _F64),
+    ("stock_based_comp", _F64),
+    ("dividends_paid", _F64),
+    ("issuance_repayment_debt", _F64),
+    ("issuance_repayment_equity", _F64),
+    ("business_acq_disposals", _F64),
+    ("investments_acq_disposals", _F64),
+    # overview (ratios are float32; book_value is a dollar total → float64)
+    ("book_value", _F64),
+    ("book_value_per_share", _F32),
+    ("revenue_per_share", _F32),
+    ("roe", _F32),
+    ("roa", _F32),
+    ("gross_margin", _F32),
+    ("profit_margin", _F32),
+    ("current_ratio", _F32),
+    ("debt_equity", _F32),
+    ("long_term_debt_equity", _F32),
+    ("piotroski_f_score", _F32),
+    ("revenue_qoq", _F32),
+    ("eps_qoq", _F32),
+    ("share_factor", _F32),
+)
+
+
+def normalize_statements(lf: pl.LazyFrame) -> pl.LazyFrame:
+    """Cast a quarterly-statements frame to the on-disk schema.
+
+    Every field in :data:`STATEMENT_FIELDS` is carried in both an as-reported
+    and an adjusted variant so downstream PEAD/SUE consumers can swap
+    point-in-time vs restated figures without re-fetching. ``date`` is the
+    filing date, cast to int32 YYYYMMDD per project convention
+    (``parse_dates`` recovers ``pl.Date`` on load).
     """
-    return lf.with_columns(
+    casts = [
         pl.col("fiscal_year").cast(pl.Int16),
         pl.col("fiscal_quarter").cast(pl.Int8),
-        pl.col("eps_diluted_as_reported").cast(pl.Float32),
-        pl.col("eps_basic_as_reported").cast(pl.Float32),
-        pl.col("eps_diluted_adjusted").cast(pl.Float32),
-        pl.col("eps_basic_adjusted").cast(pl.Float32),
-        pl.col("revenue").cast(pl.Float64),
         pl.col("date").dt.strftime("%Y%m%d").cast(pl.Int32),
-    )
+    ]
+    casts += [
+        pl.col(f"{name}_{variant}").cast(dtype)
+        for name, dtype in STATEMENT_FIELDS
+        for variant in STATEMENT_VARIANTS
+    ]
+    return lf.with_columns(casts)
 
 
 def parse_dates(lf: pl.LazyFrame) -> pl.LazyFrame:

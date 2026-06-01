@@ -11,6 +11,7 @@ from typing import Any, cast
 import polars as pl
 import requests  # type: ignore[import-untyped]
 
+from marketgoblin._normalize import STATEMENT_FIELDS, STATEMENT_VARIANTS
 from marketgoblin.classification import Classification, IndustryProfile, SectorProfile
 from marketgoblin.ticker_metadata import TickerMetadata
 
@@ -202,20 +203,139 @@ def fundamentals_daily_rows_to_lf(
     )
 
 
-# Income-statement codes lifted from each Tiingo quarterly payload.
-# epsDil + epsBasic feed downstream SUE; revenue rides along because the
-# whole incomeStatement section ships in the same response.
-_INCOME_STATEMENT_CODES: tuple[str, ...] = ("epsDil", "epsBasic", "revenue")
+# Tiingo dataCode for each on-disk statement field (see
+# _normalize.STATEMENT_FIELDS). Spans all four statement sections — Tiingo
+# ships incomeStatement / balanceSheet / cashFlow / overview in one payload, so
+# full coverage costs no extra request. The base names here must exactly cover
+# STATEMENT_FIELDS; a mismatch is caught at import below.
+_TIINGO_STATEMENT_CODES: dict[str, str] = {
+    # income statement
+    "revenue": "revenue",
+    "cost_of_revenue": "costRev",
+    "gross_profit": "grossProfit",
+    "operating_expenses": "opex",
+    "sga": "sga",
+    "rnd": "rnd",
+    "operating_income": "opinc",
+    "ebit": "ebit",
+    "ebitda": "ebitda",
+    "ebt": "ebt",
+    "interest_expense": "intexp",
+    "tax_expense": "taxExp",
+    "net_income": "netinc",
+    "net_income_common_stock": "netIncComStock",
+    "net_income_disc_ops": "netIncDiscOps",
+    "consolidated_income": "consolidatedIncome",
+    "non_controlling_interests": "nonControllingInterests",
+    "preferred_dividends": "prefDVDs",
+    "eps_basic": "eps",  # Tiingo's basic-EPS code is "eps", not "epsBasic"
+    "eps_diluted": "epsDil",
+    "weighted_avg_shares": "shareswa",
+    "weighted_avg_shares_diluted": "shareswaDil",
+    # balance sheet
+    "cash_and_eq": "cashAndEq",
+    "accounts_receivable": "acctRec",
+    "inventory": "inventory",
+    "investments_current": "investmentsCurrent",
+    "assets_current": "assetsCurrent",
+    "ppe": "ppeq",
+    "investments": "investments",
+    "investments_non_current": "investmentsNonCurrent",
+    "intangibles": "intangibles",
+    "tax_assets": "taxAssets",
+    "assets_non_current": "assetsNonCurrent",
+    "total_assets": "totalAssets",
+    "accounts_payable": "acctPay",
+    "debt_current": "debtCurrent",
+    "deferred_revenue": "deferredRev",
+    "liabilities_current": "liabilitiesCurrent",
+    "debt_non_current": "debtNonCurrent",
+    "liabilities_non_current": "liabilitiesNonCurrent",
+    "tax_liabilities": "taxLiabilities",
+    "deposits": "deposits",
+    "total_liabilities": "totalLiabilities",
+    "total_debt": "debt",
+    "equity": "equity",
+    "retained_earnings": "retainedEarnings",
+    "accumulated_oci": "accoci",
+    "shares_basic": "sharesBasic",
+    # cash flow
+    "net_cash_ops": "ncfo",
+    "net_cash_investing": "ncfi",
+    "net_cash_financing": "ncff",
+    "net_cash_flow": "ncf",
+    "fx_effect_on_cash": "ncfx",
+    "capex": "capex",
+    "free_cash_flow": "freeCashFlow",
+    "depreciation_amortization": "depamor",
+    "stock_based_comp": "sbcomp",
+    "dividends_paid": "payDiv",
+    "issuance_repayment_debt": "issrepayDebt",
+    "issuance_repayment_equity": "issrepayEquity",
+    "business_acq_disposals": "businessAcqDisposals",
+    "investments_acq_disposals": "investmentsAcqDisposals",
+    # overview
+    "book_value": "bookVal",
+    "book_value_per_share": "bvps",
+    "revenue_per_share": "rps",
+    "roe": "roe",
+    "roa": "roa",
+    "gross_margin": "grossMargin",
+    "profit_margin": "profitMargin",
+    "current_ratio": "currentRatio",
+    "debt_equity": "debtEquity",
+    "long_term_debt_equity": "longTermDebtEquity",
+    "piotroski_f_score": "piotroskiFScore",
+    "revenue_qoq": "revenueQoQ",
+    "eps_qoq": "epsQoQ",
+    "share_factor": "shareFactor",
+}
+
+# The four sections Tiingo emits under statementData. Flattened into one row.
+_STATEMENT_SECTIONS: tuple[str, ...] = (
+    "incomeStatement",
+    "balanceSheet",
+    "cashFlow",
+    "overview",
+)
+
+# Fail loud at import if the code map and on-disk schema have drifted apart —
+# a typo or a forgotten field would otherwise surface as a silent all-null
+# column or a KeyError deep in a fetch.
+_SCHEMA_NAMES = {name for name, _ in STATEMENT_FIELDS}
+_drift = _SCHEMA_NAMES ^ set(_TIINGO_STATEMENT_CODES)
+if _drift:
+    raise RuntimeError(
+        f"Tiingo statement code map out of sync with _normalize.STATEMENT_FIELDS: {sorted(_drift)}"
+    )
+
+# A second guard: two fields pointing at the same Tiingo dataCode would both
+# silently receive identical values (the flattener keys by code), with the
+# name-only check above none the wiser. Easy to do by hand in a 76-entry dict.
+_dupes = sorted(
+    code
+    for code in set(_TIINGO_STATEMENT_CODES.values())
+    if list(_TIINGO_STATEMENT_CODES.values()).count(code) > 1
+)
+if _dupes:
+    raise RuntimeError(f"Duplicate Tiingo dataCodes mapped to multiple statement fields: {_dupes}")
 
 
-def _index_data_codes(items: list[dict[str, Any]]) -> dict[str, Any]:
-    """Index a Tiingo statement-section list by its ``dataCode`` field.
+def _index_statement_codes(payload: dict[str, Any]) -> dict[str, Any]:
+    """Flatten all of a quarter's statement sections into one ``{dataCode: value}`` dict.
 
-    Each Tiingo statement section (incomeStatement, balanceSheet, …) is a
-    list of ``{dataCode, value}`` pairs. This collapses one section into a
-    flat dict keyed by code, ignoring rows missing the code.
+    Each Tiingo statement section (incomeStatement, balanceSheet, cashFlow,
+    overview) is a list of ``{dataCode, value}`` pairs. Codes are globally
+    unique across sections, so collapsing them into a single dict is lossless.
     """
-    return {item["dataCode"]: item.get("value") for item in items if "dataCode" in item}
+    data = payload.get("statementData", {}) or {}
+    indexed: dict[str, Any] = {}
+    for section in _STATEMENT_SECTIONS:
+        for item in data.get(section, []) or []:
+            code = item.get("dataCode")
+            if code is not None:
+                indexed[code] = item.get("value")
+    return indexed
 
 
 def _statement_payload_to_row(
@@ -225,44 +345,41 @@ def _statement_payload_to_row(
 ) -> dict[str, Any]:
     """Flatten one quarterly Tiingo statement payload into a single dict.
 
-    Tiingo emits the income statement as a nested list of ``{dataCode,
-    value}`` pairs; we lift the codes we care about into named columns and
-    drop everything else. ``suffix`` distinguishes the two endpoint variants
-    when the same payload shape is fetched twice (asReported=True vs False)
-    — values land in ``eps_diluted_<suffix>`` etc. so the eventual outer
-    join can pivot both into a single row per quarter.
+    Lifts every code in :data:`_TIINGO_STATEMENT_CODES` into a named column.
+    ``suffix`` distinguishes the two endpoint variants when the same payload
+    shape is fetched twice (asReported=True vs False) — values land in
+    ``<name>_<suffix>`` so the eventual outer join can pivot both variants
+    into a single row per quarter. Codes absent from a payload surface as
+    ``None``.
     """
-    income = payload.get("statementData", {}).get("incomeStatement", []) or []
-    indexed = _index_data_codes(income)
-    return {
+    indexed = _index_statement_codes(payload)
+    row: dict[str, Any] = {
         "date": payload.get("date"),  # Filing date (ISO string)
         "fiscal_year": coerce_int(payload.get("year")),
         "fiscal_quarter": coerce_int(payload.get("quarter")),
-        f"eps_diluted_{suffix}": coerce_float(indexed.get("epsDil")),
-        f"eps_basic_{suffix}": coerce_float(indexed.get("epsBasic")),
-        # Revenue is the same number under both asReported variants
-        # (Tiingo doesn't restate top-line); we collect it from one side
-        # and let the join keep one column.
-        f"revenue_{suffix}": coerce_float(indexed.get("revenue")),
     }
+    for name, _dtype in STATEMENT_FIELDS:
+        row[f"{name}_{suffix}"] = coerce_float(indexed.get(_TIINGO_STATEMENT_CODES[name]))
+    return row
 
 
 def _statements_wire_schema(suffix: str) -> dict[str, pl.DataType]:
     """Wire-level schema for one variant's from_dicts call. Declared
     explicitly so a missing field on a row materializes as a null column
     instead of crashing the projection."""
-    return {
+    schema: dict[str, pl.DataType] = {
         "date": pl.String(),
         "fiscal_year": pl.Int64(),
         "fiscal_quarter": pl.Int64(),
-        f"eps_diluted_{suffix}": pl.Float64(),
-        f"eps_basic_{suffix}": pl.Float64(),
-        f"revenue_{suffix}": pl.Float64(),
     }
+    for name, _dtype in STATEMENT_FIELDS:
+        schema[f"{name}_{suffix}"] = pl.Float64()
+    return schema
 
 
-_AS_REPORTED_SUFFIX: str = "as_reported"
-_ADJUSTED_SUFFIX: str = "adjusted"
+# Variant suffixes are owned by _normalize.STATEMENT_VARIANTS — bind names to
+# its members so the wire/flatten/join paths can't drift from the on-disk schema.
+_AS_REPORTED_SUFFIX, _ADJUSTED_SUFFIX = STATEMENT_VARIANTS
 
 
 def _one_variant_to_lf(
@@ -297,11 +414,11 @@ def statements_rows_to_lf(
     for a quarter that the adjusted call did surface, the adjusted call's
     filing date (still meaningful — last restatement) is used as fallback.
 
-    Output columns: ``date`` (Date, filing date), ``fiscal_year`` (Int),
-    ``fiscal_quarter`` (Int), ``eps_diluted_as_reported``,
-    ``eps_basic_as_reported``, ``eps_diluted_adjusted``,
-    ``eps_basic_adjusted`` (Float), ``revenue`` (Float, taken from
-    as-reported when present), ``symbol`` (str).
+    Output columns: ``date`` (Date, filing date), ``fiscal_year`` /
+    ``fiscal_quarter`` (Int), then every field in
+    :data:`~marketgoblin._normalize.STATEMENT_FIELDS` as
+    ``<name>_as_reported`` and ``<name>_adjusted`` (Float), and ``symbol``
+    (str).
 
     Raises ``ValueError`` when both inputs are empty — a ticker with no
     quarterly history at all is a non-transient upstream condition.
@@ -322,6 +439,9 @@ def statements_rows_to_lf(
 
     # Outer-join so quarters reported in one variant but not the other still
     # surface (common: very old history is sometimes only in restated form).
+    # The only overlapping non-key column is ``date``, which collides into
+    # ``date_adj_join``; every value field is variant-suffixed so both sides
+    # survive untouched.
     merged = ar_lf.join(
         adj_lf,
         on=["fiscal_year", "fiscal_quarter"],
@@ -329,29 +449,16 @@ def statements_rows_to_lf(
         suffix="_adj_join",
         coalesce=True,
     )
-    # Backfill date and revenue from whichever side has the value. As-reported
-    # wins on conflict — that's the announcement-time fact PEAD cares about.
+    # Backfill date from whichever side has it. As-reported wins on conflict —
+    # that's the announcement-time fact PEAD cares about.
+    variant_cols = [
+        f"{name}_{variant}" for name, _dtype in STATEMENT_FIELDS for variant in STATEMENT_VARIANTS
+    ]
     return (
-        merged.with_columns(
-            pl.coalesce("date", "date_adj_join").alias("date"),
-            pl.coalesce(
-                f"revenue_{_AS_REPORTED_SUFFIX}",
-                f"revenue_{_ADJUSTED_SUFFIX}",
-            ).alias("revenue"),
-        )
-        .drop("date_adj_join", f"revenue_{_AS_REPORTED_SUFFIX}", f"revenue_{_ADJUSTED_SUFFIX}")
+        merged.with_columns(pl.coalesce("date", "date_adj_join").alias("date"))
+        .drop("date_adj_join")
         .with_columns(pl.lit(symbol.upper()).alias("symbol"))
-        .select(
-            "date",
-            "fiscal_year",
-            "fiscal_quarter",
-            f"eps_diluted_{_AS_REPORTED_SUFFIX}",
-            f"eps_basic_{_AS_REPORTED_SUFFIX}",
-            f"eps_diluted_{_ADJUSTED_SUFFIX}",
-            f"eps_basic_{_ADJUSTED_SUFFIX}",
-            "revenue",
-            "symbol",
-        )
+        .select("date", "fiscal_year", "fiscal_quarter", *variant_cols, "symbol")
     )
 
 

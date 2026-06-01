@@ -106,7 +106,12 @@ def _make_prices_rows_with_split() -> list[dict[str, Any]]:
 
 
 def _make_statements_rows_as_reported() -> list[dict[str, Any]]:
-    """Tiingo's asReported=True payload — point-in-time announced values."""
+    """Tiingo's asReported=True payload — point-in-time announced values.
+
+    Carries codes from all four statement sections so tests exercise the full
+    cross-section flattening, not just the income statement. Tiingo's basic-EPS
+    code is ``eps`` (not ``epsBasic``).
+    """
     return [
         {
             "date": "2024-08-01T00:00:00.000Z",
@@ -115,9 +120,12 @@ def _make_statements_rows_as_reported() -> list[dict[str, Any]]:
             "statementData": {
                 "incomeStatement": [
                     {"dataCode": "epsDil", "value": 1.40},
-                    {"dataCode": "epsBasic", "value": 1.41},
+                    {"dataCode": "eps", "value": 1.41},
                     {"dataCode": "revenue", "value": 85_777_000_000},
                 ],
+                "balanceSheet": [{"dataCode": "totalAssets", "value": 331_612_000_000}],
+                "cashFlow": [{"dataCode": "freeCashFlow", "value": 26_700_000_000}],
+                "overview": [{"dataCode": "roe", "value": 0.32}],
             },
         },
         {
@@ -127,7 +135,7 @@ def _make_statements_rows_as_reported() -> list[dict[str, Any]]:
             "statementData": {
                 "incomeStatement": [
                     {"dataCode": "epsDil", "value": 1.53},
-                    {"dataCode": "epsBasic", "value": 1.54},
+                    {"dataCode": "eps", "value": 1.54},
                     {"dataCode": "revenue", "value": 90_753_000_000},
                 ],
             },
@@ -146,7 +154,7 @@ def _make_statements_rows_adjusted() -> list[dict[str, Any]]:
             "statementData": {
                 "incomeStatement": [
                     {"dataCode": "epsDil", "value": 1.42},
-                    {"dataCode": "epsBasic", "value": 1.43},
+                    {"dataCode": "eps", "value": 1.43},
                     {"dataCode": "revenue", "value": 85_777_000_000},
                 ],
             },
@@ -158,7 +166,7 @@ def _make_statements_rows_adjusted() -> list[dict[str, Any]]:
             "statementData": {
                 "incomeStatement": [
                     {"dataCode": "epsDil", "value": 1.55},
-                    {"dataCode": "epsBasic", "value": 1.56},
+                    {"dataCode": "eps", "value": 1.56},
                     {"dataCode": "revenue", "value": 90_753_000_000},
                 ],
             },
@@ -340,7 +348,11 @@ def test_statements_rows_to_lf_extracts_both_variants():
     assert by_quarter[3]["eps_basic_as_reported"] == pytest.approx(1.41)
     assert by_quarter[3]["eps_diluted_adjusted"] == pytest.approx(1.42)
     assert by_quarter[3]["eps_basic_adjusted"] == pytest.approx(1.43)
-    assert by_quarter[3]["revenue"] == 85_777_000_000.0
+    assert by_quarter[3]["revenue_as_reported"] == 85_777_000_000.0
+    # Balance-sheet, cash-flow and overview codes flatten alongside income
+    assert by_quarter[3]["total_assets_as_reported"] == 331_612_000_000.0
+    assert by_quarter[3]["free_cash_flow_as_reported"] == 26_700_000_000.0
+    assert by_quarter[3]["roe_as_reported"] == pytest.approx(0.32)
     assert by_quarter[3]["symbol"] == "AAPL"
 
 
@@ -355,7 +367,7 @@ def test_statements_rows_to_lf_handles_one_side_missing_quarter():
             "statementData": {
                 "incomeStatement": [
                     {"dataCode": "epsDil", "value": 1.99},
-                    {"dataCode": "epsBasic", "value": 2.00},
+                    {"dataCode": "eps", "value": 2.00},
                 ],
             },
         },
@@ -399,7 +411,7 @@ def test_statements_rows_to_lf_handles_missing_income_codes():
     assert df.height == 1
     assert df["eps_diluted_as_reported"].to_list() == [pytest.approx(1.40)]
     assert df["eps_basic_as_reported"].to_list() == [None]
-    assert df["revenue"].to_list() == [None]
+    assert df["revenue_as_reported"].to_list() == [None]
 
 
 def test_statements_rows_to_lf_handles_missing_statement_data():
@@ -868,7 +880,9 @@ def test_fetch_statements_returns_normalized_frame(source):
     assert df.schema["eps_basic_as_reported"] == pl.Float32
     assert df.schema["eps_diluted_adjusted"] == pl.Float32
     assert df.schema["eps_basic_adjusted"] == pl.Float32
-    assert df.schema["revenue"] == pl.Float64
+    assert df.schema["revenue_as_reported"] == pl.Float64
+    assert df.schema["total_assets_adjusted"] == pl.Float64
+    assert df.schema["roe_as_reported"] == pl.Float32
     assert df.height == 2
 
 

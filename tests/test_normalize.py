@@ -1,6 +1,7 @@
 from datetime import date
 
 import polars as pl
+import pytest
 
 from marketgoblin._normalize import (
     normalize_dividends,
@@ -170,46 +171,46 @@ def test_parse_dates_works_for_fundamentals_daily():
     assert df["date"][0] == date(2024, 1, 2)
 
 
-def make_raw_statements() -> pl.LazyFrame:
-    return pl.DataFrame(
-        {
-            "date": [date(2024, 8, 1), date(2024, 5, 2)],
-            "fiscal_year": pl.Series([2024, 2024], dtype=pl.Int64),
-            "fiscal_quarter": pl.Series([3, 2], dtype=pl.Int64),
-            "eps_diluted_as_reported": pl.Series([1.40, 1.53], dtype=pl.Float64),
-            "eps_basic_as_reported": pl.Series([1.41, 1.54], dtype=pl.Float64),
-            "eps_diluted_adjusted": pl.Series([1.42, 1.55], dtype=pl.Float64),
-            "eps_basic_adjusted": pl.Series([1.43, 1.56], dtype=pl.Float64),
-            "revenue": pl.Series([85_777_000_000.0, 90_753_000_000.0], dtype=pl.Float64),
-            "symbol": ["AAPL", "AAPL"],
-        }
-    ).lazy()
+@pytest.fixture
+def raw_statements(make_statements_frame) -> pl.LazyFrame:
+    # Pre-normalize wire shape: pl.Date / Int64 periods / all-Float64 fields,
+    # with the two headline anchors normalize tests assert on.
+    return make_statements_frame(
+        dates=[date(2024, 8, 1), date(2024, 5, 2)],
+        fiscal_years=[2024, 2024],
+        fiscal_quarters=[3, 2],
+        anchors={
+            "eps_diluted_as_reported": [1.40, 1.53],
+            "revenue_as_reported": [85_777_000_000.0, 90_753_000_000.0],
+        },
+        on_disk=False,
+    )
 
 
-def test_normalize_statements_dtypes():
-    df = normalize_statements(make_raw_statements()).collect()
+def test_normalize_statements_dtypes(raw_statements):
+    df = normalize_statements(raw_statements).collect()
     assert df.schema["date"] == pl.Int32
     assert df.schema["fiscal_year"] == pl.Int16
     assert df.schema["fiscal_quarter"] == pl.Int8
     assert df.schema["eps_diluted_as_reported"] == pl.Float32
-    assert df.schema["eps_basic_as_reported"] == pl.Float32
-    assert df.schema["eps_diluted_adjusted"] == pl.Float32
     assert df.schema["eps_basic_adjusted"] == pl.Float32
-    assert df.schema["revenue"] == pl.Float64
+    assert df.schema["revenue_as_reported"] == pl.Float64
+    assert df.schema["total_assets_adjusted"] == pl.Float64
+    assert df.schema["roe_as_reported"] == pl.Float32
 
 
-def test_normalize_statements_date_format():
-    df = normalize_statements(make_raw_statements()).collect()
+def test_normalize_statements_date_format(raw_statements):
+    df = normalize_statements(raw_statements).collect()
     assert df["date"].to_list() == [20240801, 20240502]
 
 
-def test_normalize_statements_preserves_large_revenue():
-    df = normalize_statements(make_raw_statements()).collect()
-    assert df["revenue"][0] == 85_777_000_000.0
+def test_normalize_statements_preserves_large_revenue(raw_statements):
+    df = normalize_statements(raw_statements).collect()
+    assert df["revenue_as_reported"][0] == 85_777_000_000.0
 
 
-def test_parse_dates_works_for_statements():
-    df = parse_dates(normalize_statements(make_raw_statements())).collect()
+def test_parse_dates_works_for_statements(raw_statements):
+    df = parse_dates(normalize_statements(raw_statements)).collect()
     assert df.schema["date"] == pl.Date
     assert df["date"][0] == date(2024, 8, 1)
 

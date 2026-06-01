@@ -40,7 +40,7 @@ Selected via the `dataset=` argument to `fetch()` / `load()` / `fetch_many()`
 | `DIVIDENDS` | ✅ | ✅ | Event-driven cash dividends, filtered to `[start, end]`. |
 | `SPLITS` | ❌ | ✅ | Event-driven `split_factor` (e.g. `2.0` = 2-for-1, `0.5` = reverse). |
 | `FUNDAMENTALS_DAILY` | ❌ | ✅ | Daily `market_cap`, `enterprise_val`, `pe_ratio`, `pb_ratio`, `trailing_peg_1y`. **Paid.** |
-| `FUNDAMENTALS_STATEMENTS` | ❌ | ✅ | Quarterly EPS (diluted/basic × as-reported/adjusted) + revenue. **Paid.** |
+| `FUNDAMENTALS_STATEMENTS` | ❌ | ✅ | Full quarterly income statement, balance sheet, cash flow & overview — every line item in both as-reported and restated variants. **Paid.** |
 
 Requesting an unsupported dataset raises `ValueError` at the dispatch layer.
 
@@ -80,7 +80,7 @@ sidecar next to each slice. `date` is stored as `int32` YYYYMMDD; pass
 | `DIVIDENDS` | `dividend` (`float32`) |
 | `SPLITS` | `split_factor` (`float32`) |
 | `FUNDAMENTALS_DAILY` | `market_cap`, `enterprise_val` (`int64`); `pe_ratio`, `pb_ratio`, `trailing_peg_1y` (`float32`) |
-| `FUNDAMENTALS_STATEMENTS` | `fiscal_year` (`int16`), `fiscal_quarter` (`int8`), `eps_{diluted,basic}_{as_reported,adjusted}` (`float32`), `revenue` (`float64`) |
+| `FUNDAMENTALS_STATEMENTS` | `fiscal_year` (`int16`), `fiscal_quarter` (`int8`), then ~76 line items — each as `<field>_as_reported` and `<field>_adjusted`. Dollar amounts & share counts `float64`; per-share figures (`eps_basic`, `eps_diluted`, `book_value_per_share`) and ratios (`roe`, `roa`, margins, `current_ratio`, `piotroski_f_score`, …) `float32`. |
 
 Metadata and classification are point-in-time (no date axis) and stored as a
 single JSON each: `{save_path}/{provider}/{metadata,classification}/{SYMBOL}.json`.
