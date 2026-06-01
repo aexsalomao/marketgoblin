@@ -78,7 +78,8 @@ def test_supported_datasets_yahoo(goblin):
 
 
 def test_supported_datasets_tiingo():
-    g = MarketGoblin(provider="tiingo")
+    # api_key keeps the TiingoClient constructor happy; no I/O is performed.
+    g = MarketGoblin(provider="tiingo", api_key="test-key")
     assert Dataset.SPLITS in g.supported_datasets
     assert Dataset.FUNDAMENTALS_DAILY in g.supported_datasets
     assert Dataset.FUNDAMENTALS_STATEMENTS in g.supported_datasets
