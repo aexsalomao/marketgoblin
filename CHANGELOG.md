@@ -7,8 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-06-01
+
+### Added
+- **Tiingo provider** (`MarketGoblin(provider="tiingo")`) — third data source backed by `tiingo.TiingoClient`, supporting OHLCV, SHARES, and DIVIDENDS. OHLCV comes from a single prices call carrying both raw and adjusted variants; SHARES is derived as `round(marketCap / close)`; DIVIDENDS and SPLITS are extracted from the same prices payload
+- `Dataset.SPLITS` — event-driven `split_factor` multiplier (e.g. `2.0` = 2-for-1, `0.5` = reverse), Tiingo-backed
+- `Dataset.FUNDAMENTALS_DAILY` — per-trading-day `market_cap`, `enterprise_val`, `pe_ratio`, `pb_ratio`, `trailing_peg_1y` (Tiingo, paid endpoint)
+- `Dataset.FUNDAMENTALS_STATEMENTS` — full quarterly income statement, balance sheet, cash flow, and overview: ~76 line items, each in both as-reported (point-in-time) and restated (adjusted) variants (Tiingo, paid endpoint). Dollar amounts and share counts are `float64`; per-share figures and ratios are `float32`
+- `TiingoSource.fetch_metadata()` / `fetch_classification()` — Tiingo-backed `TickerMetadata` and sector/industry `Classification`
+- `_normalize.STATEMENT_FIELDS` — single source of truth for the statements on-disk schema (names, dtypes, order); the Tiingo dataCode→column map is guarded against drift and duplicate codes at import
+- `normalize_splits` / `normalize_fundamentals_daily` / `normalize_statements` and `build_splits` / `build_fundamentals_daily` / `build_fundamentals_statements` for the new datasets
+- Automatic `.env` loading at package import (`_bootstrap.py`) for credential management (e.g. `TIINGO_API_KEY`); `.env.example` added
+- Provider comparison docs (`docs/providers.md`), a walkthrough notebook (`notebooks/marketgoblin_walkthrough.ipynb`), and a sector-map build script (`scripts/build_sector_map.py`)
+
+### Changed
+- Tiingo's two statements calls (`asReported=True`/`False`) are issued behind separate retries and merged on `(fiscal_year, fiscal_quarter)` so a transient failure on one variant doesn't replay the other
+
+### Fixed
+- Basic EPS was read from a non-existent Tiingo code (`epsBasic`); it is `eps`, so `eps_basic_*` had been silently null
+- Environment-dependent Tiingo dataset test made deterministic
+
 ### Removed
-- `CSVSource` and the `"csv"` provider — the local-CSV OHLCV source was unused. `MarketGoblin(provider="csv", ...)` now raises `ValueError: Unknown provider`.
+- `CSVSource` and the `"csv"` provider — the local-CSV OHLCV source was unused. `MarketGoblin(provider="csv", ...)` now raises `ValueError: Unknown provider` (**breaking**)
+- `TODO.md` roadmap from the repo root
 
 ## [0.4.0] - 2026-04-20
 
