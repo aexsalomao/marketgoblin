@@ -5,7 +5,7 @@ Supports multiple datasets (OHLCV, shares-outstanding, dividends, splits, daily
 fundamentals, quarterly statements, ...) via a per-source dispatch layer.
 
 - **Python:** 3.13 | **Build:** uv_build | **License:** MIT
-- **Core deps:** `polars>=1.0`, `yfinance>=0.2`, `pyarrow>=15.0`
+- **Core deps:** `polars>=1.0`, `yfinance>=0.2`, `pyarrow>=15.0`, `tiingo>=0.16`, `python-dotenv>=1.2.2`
 - **Dev deps:** `pytest>=8.0`, `pytest-cov>=5.0`, `ruff>=0.8.0`, `mypy>=1.10.0`, `pre-commit>=3.7.0`, `mkdocs>=1.6.0`, `mkdocs-material>=9.5.0`
 
 ## Setup & Tests
@@ -33,27 +33,50 @@ pytest --cov=marketgoblin  # with coverage
 
 ```
 src/marketgoblin/
-    __init__.py           # exports MarketGoblin, Dataset; __version__
+    __init__.py           # exports MarketGoblin, Dataset, TickerMetadata, Classification + profiles, sector-index types/loaders; __version__
+    _bootstrap.py         # side-effect import: load_dotenv() so TIINGO_API_KEY etc. resolve from .env (imported first by __init__)
     datasets.py           # Dataset StrEnum (OHLCV, SHARES, DIVIDENDS, SPLITS, FUNDAMENTALS_DAILY, FUNDAMENTALS_STATEMENTS)
     goblin.py             # MarketGoblin — public API facade
     _normalize.py         # normalize_ohlcv, normalize_shares, normalize_dividends, normalize_splits, normalize_fundamentals_daily, normalize_statements, parse_dates — pure
     _metadata.py          # build_ohlcv, build_shares, build_dividends, build_splits, build_fundamentals_daily, build_fundamentals_statements, write — pure
+    _serialization.py     # JSONSerializable — to_dict / from_dict mixin for the persisted dataclasses
+    ticker_metadata.py    # TickerMetadata dataclass — unified, source-agnostic ticker profile
+    classification.py     # SectorProfile / IndustryProfile / Classification dataclasses
+    sector_indices.py     # Public sector→index API: load_sector_indices / refresh_sector_indices + re-exported types
+    _sector_indices_parser.py   # Private GICS taxonomy + S&P 500 scrape parser → SectorIndexMapping (and its dataclasses)
+    _sector_indices_data/       # Shipped JSON: us.json (snapshot) + gics_taxonomy_us.json (curated 4-level taxonomy)
     sources/
         base.py           # BaseSource ABC + Fetcher type alias
         yahoo.py          # YahooSource — OHLCV + SHARES + DIVIDENDS via yfinance
         _yahoo_parsing.py # Pure helpers behind YahooSource (info → TickerMetadata, etc.)
-        tiingo.py         # TiingoSource — OHLCV + SHARES + DIVIDENDS via tiingo.TiingoClient
-        _tiingo_parsing.py # Pure helpers behind TiingoSource (JSON → frames + dataclasses)
+        tiingo.py         # TiingoSource — OHLCV/SHARES/DIVIDENDS/SPLITS/FUNDAMENTALS_* via tiingo.TiingoClient
+        _tiingo_parsing/  # Pure helpers behind TiingoSource (package, see below)
+            __init__.py   # re-exports the orchestrator-facing surface
+            common.py     # coercions, slugify, ISO-date parse
+            prices.py     # OHLCV / dividends / splits from the prices payload
+            fundamentals.py  # daily valuation, quarterly statements, derived shares
+            metadata.py   # TickerMetadata + Classification adapters; /fundamentals/meta REST call
     storage/
-        disk.py           # DiskStorage — dataset-aware monthly .pq slices
+        disk.py           # DiskStorage — dataset-aware monthly .pq slices + metadata/classification JSON
+scripts/
+    build_sector_map.py   # CLI: ticker list → Yahoo classifications → (ticker, sector) parquet
 tests/
+    conftest.py           # make_statements_frame fixture (full STATEMENT_FIELDS scaffold)
+    _tiingo_data.py       # shared Tiingo JSON-shape builders (imported by test_tiingo*)
     test_metadata.py
     test_normalize.py
     test_storage.py
     test_goblin.py
-    test_yahoo.py         # YahooSource fetch tests (yfinance mocked)
-    test_tiingo.py        # TiingoSource fetch tests (TiingoClient + requests mocked)
-docs/                     # MkDocs source (index.md, api.md, contributing.md, changelog.md)
+    test_ticker_metadata.py
+    test_classification.py
+    test_sector_indices.py
+    test_yahoo.py             # YahooSource fetch tests (yfinance mocked)
+    test_tiingo.py            # TiingoSource orchestration tests (TiingoClient + requests mocked)
+    test_tiingo_prices.py     # prices/dividends/splits parser unit tests
+    test_tiingo_fundamentals.py  # daily/statements/derived-shares parser unit tests
+    test_tiingo_metadata.py   # metadata/classification/slugify parser unit tests
+docs/                     # MkDocs source (index.md, api.md, providers.md, contributing.md, changelog.md)
+notebooks/                # marketgoblin_walkthrough.ipynb
 example.py
 mkdocs.yml
 ```
@@ -79,6 +102,7 @@ class Dataset(StrEnum):
 
 ```python
 _SOURCES: dict[str, type[BaseSource]] = {"yahoo": YahooSource, "tiingo": TiingoSource}
+_DATE_FMT = "%Y-%m-%d"
 
 _validate_dates(start, end)              # bad format or start >= end → ValueError
 
@@ -90,6 +114,10 @@ class MarketGoblin:
     def supported_datasets(self) -> frozenset[Dataset]
     def fetch(self, symbol, start, end, dataset=Dataset.OHLCV, parse_dates=False) -> pl.LazyFrame
     def load(self, symbol, start, end, dataset=Dataset.OHLCV, parse_dates=False) -> pl.LazyFrame
+    def fetch_metadata(self, symbol, *, fast=False) -> TickerMetadata
+    def load_metadata(self, symbol) -> TickerMetadata
+    def fetch_classification(self, symbol) -> Classification
+    def load_classification(self, symbol) -> Classification
     def fetch_many(self, symbols, start, end, dataset=Dataset.OHLCV, parse_dates=False, max_workers=8, requests_per_second=2.0) -> dict[str, pl.LazyFrame]
 ```
 
@@ -97,6 +125,7 @@ class MarketGoblin:
 - OHLCV is returned as a tidy stacked frame with an `is_adjusted: bool` column — each trading day appears twice (adjusted + raw). Filter downstream (`.filter(pl.col("is_adjusted"))`) to pick a variant. No `adjusted` parameter on the public API.
 - `fetch()` validates dates, downloads via source, saves to disk (if `save_path` set), returns `LazyFrame`
 - `load()` requires `save_path`; raises `RuntimeError` otherwise
+- `fetch_metadata` / `fetch_classification` delegate to the source's like-named methods (Tiingo only today), persisting to disk when `save_path` is set; `load_metadata` / `load_classification` read the JSON sidecars back. All four require the active source to implement the method, else `RuntimeError` / `AttributeError`-style failure surfaces.
 - `fetch_many()` uses `ThreadPoolExecutor` + `_RateLimiter`; failed symbols logged and excluded — never crashes the batch
 - `**source_kwargs` are forwarded to the source constructor
 - To add a provider: subclass `BaseSource`, implement `_build_dispatch()`, add to `_SOURCES`
@@ -199,8 +228,21 @@ class TiingoSource(BaseSource):
 - `fetch_metadata`: merges `client.get_ticker_metadata` + latest row from `client.get_fundamentals_daily` (`marketCap`, `peRatio`) + latest close via `client.get_ticker_price` (used to derive `shares_outstanding`). `fast=True` skips both paid lookups.
 - `fetch_classification`: direct `requests.get` against `/tiingo/fundamentals/meta` (paid; not wrapped by the Python client). Sector / industry strings → slugified `SectorProfile` / `IndustryProfile` keys; constituent fields stay at dataclass defaults.
 - All Tiingo REST calls send the symbol lowercase; on-disk `symbol` columns are uppercase.
-- Pure parsing helpers (frame-builders, dataclass-builders, `requests.get` wrapper) live in `_tiingo_parsing.py` so the `TiingoSource` class stays a thin orchestrator.
+- Pure parsing helpers (frame-builders, dataclass-builders, `requests.get` wrapper) live in the `_tiingo_parsing/` package so the `TiingoSource` class stays a thin orchestrator — see its section below. `tiingo.py` imports the orchestrator-facing names from the package root (`_tiingo_parsing/__init__.py` re-exports them).
 - `_retry_fetch` retries on transient errors with backoff (1 s, 2 s); `ValueError` (empty data) propagates immediately.
+
+### `sources/_tiingo_parsing/` — Tiingo parser package
+
+Pure, side-effect-free adapters between Tiingo's JSON shapes and the project's
+frame/dataclass schema. Split by concern; `__init__.py` re-exports the
+orchestrator-facing names so `tiingo.py` (and any legacy importer) keeps using
+`from ..._tiingo_parsing import <name>`. Concern-specific tests import from the
+concrete submodule.
+
+- `common.py` — `coerce_int`, `coerce_float`, `first_present`, `slugify`, `parse_tiingo_date_col`. No Tiingo-shape knowledge; the shared primitives the other submodules build on.
+- `prices.py` — projects the prices payload: `prices_rows_to_base_lf`, `build_raw_ohlcv_lf`, `build_adjusted_ohlcv_lf`, `stack_ohlcv`, `prices_rows_to_stacked_ohlcv`, `prices_rows_to_dividends`, `prices_rows_to_splits`.
+- `fundamentals.py` — `fundamentals_daily_rows_to_lf`, `statements_rows_to_lf`, `derive_shares_from_marketcap`, plus the `_TIINGO_STATEMENT_CODES` dataCode→column map and the two import-time guards (drift vs. `_normalize.STATEMENT_FIELDS`, and duplicate-code detection) that fail loud at import if the map and on-disk schema diverge.
+- `metadata.py` — `fetch_latest_close`, `fetch_latest_fundamentals`, `build_tiingo_metadata`, `fetch_fundamentals_meta`, `build_tiingo_classification`. The only submodule importing `requests` (the `/fundamentals/meta` REST call); patch `_tiingo_parsing.metadata.requests` in tests.
 
 ### `storage/disk.py` — `DiskStorage`
 
@@ -209,16 +251,72 @@ class DiskStorage:
     def __init__(self, base_path)
     def save(self, provider, symbol, dataset, lf) -> None
     def load(self, provider, symbol, dataset, start, end, parse_dates=False) -> pl.LazyFrame
+    def save_metadata(self, provider, metadata: TickerMetadata) -> None
+    def load_metadata(self, provider, symbol) -> TickerMetadata
+    def save_classification(self, provider, classification: Classification) -> None
+    def load_classification(self, provider, symbol) -> Classification
 
     # private
     def _symbol_dir(self, provider, symbol, dataset) -> Path
     def _slice_path(self, provider, symbol, dataset, ym) -> Path
+    def _metadata_path(self, provider, symbol) -> Path          # {base}/{provider}/metadata/{SYMBOL}.json
+    def _classification_path(self, provider, symbol) -> Path    # {base}/{provider}/classification/{SYMBOL}.json
     def _build_metadata(self, chunk, provider, symbol, dataset, ym, file_size_bytes) -> dict
     def _atomic_write(self, df, path) -> None
 ```
 
 Path scheme is uniform across datasets: `{base_path}/{provider}/{dataset}/{SYMBOL}/{SYMBOL}_{YYYY-MM}.pq`. OHLCV no longer has an adjusted/raw variant segment — both variants live in the same parquet files, distinguished by the `is_adjusted` column.
-`_build_metadata` dispatches to `build_ohlcv` / `build_shares` / `build_dividends`. Missing-days warnings only emitted for OHLCV.
+`_build_metadata` dispatches per `Dataset` to the matching `build_*` in `_metadata.py` (ohlcv / shares / dividends / splits / fundamentals_daily / fundamentals_statements). Missing-days warnings only emitted for OHLCV.
+`TickerMetadata` and `Classification` are persisted as standalone JSON (not monthly slices) under `{provider}/metadata/` and `{provider}/classification/`, atomically via `.tmp` rename; the load methods raise `FileNotFoundError` when absent.
+
+### `ticker_metadata.py` — `TickerMetadata`
+
+Frozen `JSONSerializable` dataclass: a unified, source-agnostic ticker profile
+(`symbol` + optional quote identity, profile, valuation, history-metadata, and
+provenance fields, plus an `extras: dict` catch-all and `is_fast: bool`).
+Source adapters build it (`build_tiingo_metadata`, the Yahoo equivalent);
+`DiskStorage` round-trips it as JSON.
+
+### `classification.py` — `SectorProfile` / `IndustryProfile` / `Classification`
+
+Three frozen `JSONSerializable` dataclasses. `Classification` bundles a
+`symbol` with optional `SectorProfile` and `IndustryProfile` sub-profiles plus
+provenance; it overrides `from_dict` to rebuild the nested profiles. Tiingo
+populates only the `key`/`name` (and industry→sector linkage); constituent
+fields (`top_companies`, `etf_symbol`, `market_cap`, ...) stay at defaults for
+sources that don't expose them.
+
+### `sector_indices.py` + `_sector_indices_parser.py` — GICS sector→index mapping
+
+```python
+def load_sector_indices(market="US") -> SectorIndexMapping       # read shipped JSON
+def refresh_sector_indices(market="US", output_path=None) -> SectorIndexMapping  # re-parse + rewrite
+```
+
+`sector_indices.py` is the public facade (exported from the package root). It
+reads the shipped snapshot in `_sector_indices_data/us.json`, or re-runs the
+private parser. `_SUPPORTED_MARKETS = {"US"}`; unsupported market → `ValueError`.
+
+`_sector_indices_parser.py` holds the 4-level GICS dataclasses (`SectorIndex` >
+`IndustryGroup` > `Industry` > `SubIndustry`, all `JSONSerializable`) and
+`SectorIndexMapping`. `parse_us_sector_indices(fetcher=None, taxonomy_path=None)`
+loads the curated `gics_taxonomy_us.json`, scrapes S&P 500 constituents from
+Wikipedia (`_WikitableParser`) for sub-industry counts, and rolls them up; both
+the fetcher and taxonomy path are injectable for tests. `write_mapping` /
+`load_taxonomy` are the I/O helpers.
+
+### `_serialization.py` — `JSONSerializable`
+
+`to_dict` / `from_dict` mixin for the persisted dataclasses. Flat dataclasses
+use it directly; classes with nested dataclass fields inherit `to_dict` and
+override `from_dict`. `from_dict` silently drops unknown keys so old JSON
+sidecars stay loadable after the schema grows a field.
+
+### `_bootstrap.py`
+
+Side-effect-only module: runs `dotenv.load_dotenv()` at import so credentials
+(e.g. `TIINGO_API_KEY`) resolve from a local `.env` without per-shell exports.
+Imported first by `__init__.py`; existing shell exports take precedence.
 
 ## Data Conventions
 
@@ -231,24 +329,42 @@ Path scheme is uniform across datasets: `{base_path}/{provider}/{dataset}/{SYMBO
 ## Import Graph
 
 ```
+__init__.py  ──→ _bootstrap (side effect), goblin, datasets, ticker_metadata,
+                 classification, sector_indices
+
 goblin.py
   ├── datasets.Dataset
   ├── _normalize.parse_dates
-  ├── sources.yahoo.YahooSource     ──→ _normalize.normalize_ohlcv, normalize_shares, normalize_dividends
+  ├── ticker_metadata.TickerMetadata, classification.Classification
+  ├── sources.yahoo.YahooSource     ──→ _normalize.normalize_* (ohlcv/shares/dividends)
   │                                 ──→ sources.base.BaseSource, Fetcher
   │                                 ──→ sources._yahoo_parsing (build_ticker_metadata, fetch_sector_profile, ...)
   │                                 ──→ datasets.Dataset
-  ├── sources.tiingo.TiingoSource   ──→ _normalize.normalize_ohlcv, normalize_shares, normalize_dividends
+  ├── sources.tiingo.TiingoSource   ──→ _normalize.normalize_* (ohlcv/shares/dividends/splits/fundamentals_daily/statements)
   │                                 ──→ sources.base.BaseSource, Fetcher
   │                                 ──→ sources._tiingo_parsing (prices_rows_to_stacked_ohlcv, build_tiingo_metadata, ...)
-  │                                 ──→ datasets.Dataset
-  └── storage.disk.DiskStorage      ──→ _metadata.build_ohlcv, build_shares, build_dividends, write
+  │                                 ──→ classification, ticker_metadata, datasets.Dataset
+  └── storage.disk.DiskStorage      ──→ _metadata.build_* + write
                                     ──→ _normalize.parse_dates
-                                    ──→ datasets.Dataset
+                                    ──→ classification, ticker_metadata, datasets.Dataset
+
+sources/_tiingo_parsing/
+  __init__.py    ──→ prices, fundamentals, metadata           (re-export only)
+  common.py      (no local imports)
+  prices.py      ──→ _tiingo_parsing.common
+  fundamentals.py──→ _tiingo_parsing.common, _normalize (STATEMENT_FIELDS, STATEMENT_VARIANTS)
+  metadata.py    ──→ _tiingo_parsing.common, classification, ticker_metadata
+
+sector_indices.py        ──→ _sector_indices_parser
+_sector_indices_parser.py──→ _serialization
+ticker_metadata.py       ──→ _serialization
+classification.py        ──→ _serialization
 
 datasets.py     (no local imports)
 _normalize.py   (no local imports)
 _metadata.py    (no local imports)
+_serialization.py (no local imports)
+_bootstrap.py   (no local imports — runs dotenv.load_dotenv())
 ```
 
 ## Code Style
