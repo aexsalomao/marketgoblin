@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-06-01
+
+### Fixed
+- `marketgoblin.__version__` reported `0.4.0` on the 0.5.0 release — the package `__version__` string was never bumped. It now tracks the released version
+
+### Changed
+- Internal: split `sources/_tiingo_parsing.py` into a `_tiingo_parsing/` package (`common` / `prices` / `fundamentals` / `metadata`) with a re-exporting `__init__`, and reorganized the Tiingo test suite to match. No public API or behavior change
+
 ## [0.5.0] - 2026-06-01
 
 ### Added

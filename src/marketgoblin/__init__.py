@@ -15,7 +15,7 @@ from marketgoblin.sector_indices import (
 )
 from marketgoblin.ticker_metadata import TickerMetadata
 
-__version__ = "0.4.0"
+__version__ = "0.5.1"
 __all__ = [
     "Classification",
     "Dataset",
