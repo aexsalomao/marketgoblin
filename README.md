@@ -24,7 +24,7 @@
 - **Retry logic** — `YahooSource` retries transient failures with exponential backoff (3 attempts)
 - **Rate limiting** — `fetch_many()` respects a configurable requests-per-second cap (default: 2 req/s)
 - **Input validation** — dates are validated before any I/O; unsupported `(provider, dataset)` pairs raise at the dispatch boundary
-- **Pluggable providers** — subclass `BaseSource`, implement `_build_dispatch()`, register in one line; `CSVSource` included
+- **Pluggable providers** — subclass `BaseSource`, implement `_build_dispatch()`, register in one line; `YahooSource` and `TiingoSource` included
 
 ---
 
@@ -109,9 +109,12 @@ MarketGoblin(provider: str, api_key: str | None = None, save_path: str | Path | 
 
 | Dataset | Provider support | Columns |
 |---|---|---|
-| `Dataset.OHLCV` | `yahoo`, `csv` | `date` (int32), `open` / `high` / `low` / `close` (float32), `volume` (int64), `is_adjusted` (bool), `symbol` |
-| `Dataset.SHARES` | `yahoo` | `date` (int32), `shares` (int64), `symbol` |
-| `Dataset.DIVIDENDS` | `yahoo` | `date` (int32), `dividend` (float32), `symbol` |
+| `Dataset.OHLCV` | `yahoo`, `tiingo` | `date` (int32), `open` / `high` / `low` / `close` (float32), `volume` (int64), `is_adjusted` (bool), `symbol` |
+| `Dataset.SHARES` | `yahoo`, `tiingo` | `date` (int32), `shares` (int64), `symbol` |
+| `Dataset.DIVIDENDS` | `yahoo`, `tiingo` | `date` (int32), `dividend` (float32), `symbol` |
+| `Dataset.SPLITS` | `tiingo` | `date` (int32), `split_factor` (float32), `symbol` |
+| `Dataset.FUNDAMENTALS_DAILY` | `tiingo` | `date` (int32), `market_cap` / `enterprise_val` (int64), `pe_ratio` / `pb_ratio` / `trailing_peg_1y` (float32), `symbol` |
+| `Dataset.FUNDAMENTALS_STATEMENTS` | `tiingo` | `date` (int32), `fiscal_year` (int16), `fiscal_quarter` (int8), `eps_*` (float32), `revenue` (float64), `symbol` |
 
 OHLCV is returned as a tidy stacked frame: each trading day appears twice (`is_adjusted=True` and `is_adjusted=False`). Filter downstream (`.filter(pl.col("is_adjusted"))`) to pick a variant. Adjusted Open/High/Low are derived locally from the `Adj Close / Close` ratio — verified to match yfinance's `auto_adjust=True` output exactly while halving network calls.
 
@@ -152,14 +155,7 @@ Per-dataset fetchers all share the `(symbol, start, end)` signature — there is
 Then register it in `goblin.py`:
 
 ```python
-_SOURCES = {"yahoo": YahooSource, "csv": CSVSource, "mysource": MySource}
-```
-
-A `CSVSource` is included out of the box for loading local CSV files (CSVs hold a single variant — pass `is_adjusted=...` to stamp the flag on every row):
-
-```python
-goblin = MarketGoblin(provider="csv", data_dir="./csv_files", is_adjusted=True)
-lf = goblin.fetch("AAPL", "2024-01-01", "2024-03-31")
+_SOURCES = {"yahoo": YahooSource, "tiingo": TiingoSource, "mysource": MySource}
 ```
 
 ---

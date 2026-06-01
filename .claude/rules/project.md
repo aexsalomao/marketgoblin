@@ -44,7 +44,6 @@ src/marketgoblin/
         _yahoo_parsing.py # Pure helpers behind YahooSource (info → TickerMetadata, etc.)
         tiingo.py         # TiingoSource — OHLCV + SHARES + DIVIDENDS via tiingo.TiingoClient
         _tiingo_parsing.py # Pure helpers behind TiingoSource (JSON → frames + dataclasses)
-        csv_source.py     # CSVSource — OHLCV-only
     storage/
         disk.py           # DiskStorage — dataset-aware monthly .pq slices
 tests/
@@ -52,7 +51,6 @@ tests/
     test_normalize.py
     test_storage.py
     test_goblin.py
-    test_csv_source.py
     test_yahoo.py         # YahooSource fetch tests (yfinance mocked)
     test_tiingo.py        # TiingoSource fetch tests (TiingoClient + requests mocked)
 docs/                     # MkDocs source (index.md, api.md, contributing.md, changelog.md)
@@ -80,7 +78,7 @@ class Dataset(StrEnum):
 ### `goblin.py` — `MarketGoblin`
 
 ```python
-_SOURCES: dict[str, type[BaseSource]] = {"yahoo": YahooSource, "csv": CSVSource, "tiingo": TiingoSource}
+_SOURCES: dict[str, type[BaseSource]] = {"yahoo": YahooSource, "tiingo": TiingoSource}
 
 _validate_dates(start, end)              # bad format or start >= end → ValueError
 
@@ -100,7 +98,7 @@ class MarketGoblin:
 - `fetch()` validates dates, downloads via source, saves to disk (if `save_path` set), returns `LazyFrame`
 - `load()` requires `save_path`; raises `RuntimeError` otherwise
 - `fetch_many()` uses `ThreadPoolExecutor` + `_RateLimiter`; failed symbols logged and excluded — never crashes the batch
-- `**source_kwargs` are forwarded to the source constructor (e.g. `data_dir`, `is_adjusted` for `CSVSource`)
+- `**source_kwargs` are forwarded to the source constructor
 - To add a provider: subclass `BaseSource`, implement `_build_dispatch()`, add to `_SOURCES`
 - To add a dataset: extend `Dataset` enum, add `_fetch_<dataset>` method on relevant sources and register in their `_build_dispatch()`, add a `normalize_<dataset>` and `build_<dataset>` for storage, and extend `DiskStorage._build_metadata` dispatch
 
@@ -204,17 +202,6 @@ class TiingoSource(BaseSource):
 - Pure parsing helpers (frame-builders, dataclass-builders, `requests.get` wrapper) live in `_tiingo_parsing.py` so the `TiingoSource` class stays a thin orchestrator.
 - `_retry_fetch` retries on transient errors with backoff (1 s, 2 s); `ValueError` (empty data) propagates immediately.
 
-### `sources/csv_source.py` — `CSVSource`
-
-```python
-class CSVSource(BaseSource):
-    name = "csv"
-    def __init__(self, api_key=None, data_dir=".", is_adjusted=True, **kwargs)
-    def _fetch_ohlcv(self, symbol, start, end) -> pl.LazyFrame
-```
-
-Reads `{data_dir}/{SYMBOL}.csv`. Expected columns: `date` (YYYY-MM-DD), `open`, `high`, `low`, `close`, `volume`, `symbol`. CSVs are assumed to hold a single variant (adjusted or raw) — `CSVSource` stamps the configured `is_adjusted` flag on every row. OHLCV-only — other datasets raise `ValueError` at the dispatch layer.
-
 ### `storage/disk.py` — `DiskStorage`
 
 ```python
@@ -254,9 +241,6 @@ goblin.py
   ├── sources.tiingo.TiingoSource   ──→ _normalize.normalize_ohlcv, normalize_shares, normalize_dividends
   │                                 ──→ sources.base.BaseSource, Fetcher
   │                                 ──→ sources._tiingo_parsing (prices_rows_to_stacked_ohlcv, build_tiingo_metadata, ...)
-  │                                 ──→ datasets.Dataset
-  ├── sources.csv_source.CSVSource  ──→ _normalize.normalize_ohlcv
-  │                                 ──→ sources.base.BaseSource, Fetcher
   │                                 ──→ datasets.Dataset
   └── storage.disk.DiskStorage      ──→ _metadata.build_ohlcv, build_shares, build_dividends, write
                                     ──→ _normalize.parse_dates

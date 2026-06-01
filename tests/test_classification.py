@@ -174,15 +174,6 @@ def test_fetch_classification_uppercases_symbol(source):
     assert classification.symbol == "AAPL"
 
 
-# --- CSVSource does not support classification ---
-
-
-def test_csv_source_fetch_classification_raises():
-    goblin = MarketGoblin(provider="csv")
-    with pytest.raises(NotImplementedError):
-        goblin.fetch_classification("AAPL")
-
-
 # --- MarketGoblin.fetch_classification + load_classification ---
 
 

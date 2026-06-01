@@ -68,7 +68,7 @@ Run the public API against a tmp dir and check that the artifacts produced satis
 1. Write a short `pytest` that exercises `MarketGoblin.fetch` / `fetch_many` / `load` against `tmp_path` with a stub `BaseSource` that returns a deterministic frame.
 2. Assert each invariant above that's relevant to the changed area.
 3. Run `pytest -k "slice or storage or parquet"` to confirm existing coverage still passes.
-4. If a new provider was added, also add a round-trip test in `tests/sources/test_<provider>.py` using `CSVSource`'s pattern as the reference.
+4. If a new provider was added, also add a round-trip test in `tests/sources/test_<provider>.py` using `TiingoSource`'s pattern as the reference.
 
 ## What not to do
 

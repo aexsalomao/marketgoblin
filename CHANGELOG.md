@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+- `CSVSource` and the `"csv"` provider — the local-CSV OHLCV source was unused. `MarketGoblin(provider="csv", ...)` now raises `ValueError: Unknown provider`.
+
 ## [0.4.0] - 2026-04-20
 
 ### Added

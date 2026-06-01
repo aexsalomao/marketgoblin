@@ -51,7 +51,7 @@ pip install marketgoblin
 
     ---
 
-    Subclass `BaseSource`, implement one method, register in one line. Ships with `YahooSource` and `CSVSource` out of the box.
+    Subclass `BaseSource`, implement one method, register in one line. Ships with `YahooSource` and `TiingoSource` out of the box.
 
 -   :material-shield-check:{ .lg .middle } **Reliable by default**
 
@@ -150,17 +150,23 @@ pip install marketgoblin
         print(f"{symbol}: {lf.collect().height} rows")
     ```
 
-=== "Custom CSV source"
+=== "Tiingo fundamentals"
 
     ```python
-    from marketgoblin import MarketGoblin
+    from marketgoblin import Dataset, MarketGoblin
 
-    # Reads {data_dir}/AAPL.csv
-    # Expected columns: date, open, high, low, close, volume, symbol
-    goblin = MarketGoblin(provider="csv", data_dir="./csv_files")
+    # Tiingo covers the full catalog (splits, daily & quarterly fundamentals).
+    # Reads its key from api_key= or the TIINGO_API_KEY env var.
+    goblin = MarketGoblin(provider="tiingo", save_path="./data")
 
-    lf = goblin.fetch("AAPL", "2024-01-01", "2024-03-31")
-    print(lf.collect())
+    statements = goblin.fetch(
+        "AAPL",
+        "2023-01-01",
+        "2024-03-31",
+        dataset=Dataset.FUNDAMENTALS_STATEMENTS,
+        parse_dates=True,
+    )
+    print(statements.collect())
     ```
 
 <div align="center" markdown>
@@ -189,6 +195,11 @@ pip install marketgoblin
 
 | Dataset | Providers | Notes |
 |---|---|---|
-| `Dataset.OHLCV` | `yahoo`, `csv` | Daily open/high/low/close/volume. Tidy stacked: each day appears twice with `is_adjusted=True`/`False`. Adjusted Open/High/Low are derived locally from `Adj Close / Close` (zero numerical drift vs `auto_adjust=True`, half the network calls). |
-| `Dataset.SHARES` | `yahoo` | Shares outstanding — sparse, corporate-action-driven cadence. Deduplicated to one row per day (last value wins). |
-| `Dataset.DIVIDENDS` | `yahoo` | Cash dividend events — typically quarterly. Filtered to the requested `[start, end]` range. |
+| `Dataset.OHLCV` | `yahoo`, `tiingo` | Daily open/high/low/close/volume. Tidy stacked: each day appears twice with `is_adjusted=True`/`False`. Adjusted Open/High/Low are derived locally from `Adj Close / Close` (zero numerical drift vs `auto_adjust=True`, half the network calls). |
+| `Dataset.SHARES` | `yahoo`, `tiingo` | Shares outstanding — sparse, corporate-action-driven cadence. Deduplicated to one row per day (last value wins). |
+| `Dataset.DIVIDENDS` | `yahoo`, `tiingo` | Cash dividend events — typically quarterly. Filtered to the requested `[start, end]` range. |
+| `Dataset.SPLITS` | `tiingo` | Forward/reverse split events as a `split_factor` multiplier. |
+| `Dataset.FUNDAMENTALS_DAILY` | `tiingo` | Daily market cap, enterprise value, and valuation ratios. Paid endpoint. |
+| `Dataset.FUNDAMENTALS_STATEMENTS` | `tiingo` | Quarterly EPS (diluted/basic × as-reported/adjusted) and revenue. Paid endpoint. |
+
+See [Providers & Capabilities](providers.md) for the full matrix.

@@ -16,7 +16,7 @@ Dataset.DIVIDENDS  # "dividends"
 
 | Member | Columns | Providers |
 |---|---|---|
-| `Dataset.OHLCV` | `date` (int32 YYYYMMDD), `open` / `high` / `low` / `close` (float32), `volume` (int64), `is_adjusted` (bool), `symbol` | `yahoo`, `tiingo`, `csv` |
+| `Dataset.OHLCV` | `date` (int32 YYYYMMDD), `open` / `high` / `low` / `close` (float32), `volume` (int64), `is_adjusted` (bool), `symbol` | `yahoo`, `tiingo` |
 | `Dataset.SHARES` | `date` (int32 YYYYMMDD), `shares` (int64), `symbol` | `yahoo`, `tiingo` |
 | `Dataset.DIVIDENDS` | `date` (int32 YYYYMMDD), `dividend` (float32), `symbol` | `yahoo`, `tiingo` |
 
@@ -27,7 +27,7 @@ adjusted_only = goblin.fetch("AAPL", start, end).filter(pl.col("is_adjusted"))
 raw_only      = goblin.fetch("AAPL", start, end).filter(~pl.col("is_adjusted"))
 ```
 
-Requesting a dataset a provider does not support (e.g. `Dataset.SHARES` from `CSVSource`) raises `ValueError` at the dispatch layer — no silent fallbacks.
+Requesting a dataset a provider does not support (e.g. `Dataset.SPLITS` from `YahooSource`) raises `ValueError` at the dispatch layer — no silent fallbacks.
 
 ---
 
@@ -54,10 +54,10 @@ MarketGoblin(
 
 | Parameter | Description |
 |---|---|
-| `provider` | Data source name: `"yahoo"`, `"tiingo"`, or `"csv"` |
+| `provider` | Data source name: `"yahoo"` or `"tiingo"` |
 | `api_key` | API key for providers that require one (Tiingo requires one; Yahoo does not) |
 | `save_path` | Root directory for disk persistence. Required for `load()`. |
-| `**source_kwargs` | Extra keyword arguments forwarded to the source constructor (e.g. `data_dir` for `CSVSource`) |
+| `**source_kwargs` | Extra keyword arguments forwarded to the source constructor |
 
 ### Properties
 
@@ -67,8 +67,10 @@ MarketGoblin(
 supported_datasets: frozenset[Dataset]
 ```
 
-Datasets that the configured provider can fetch. For `"yahoo"` and `"tiingo"`:
-`{Dataset.OHLCV, Dataset.SHARES, Dataset.DIVIDENDS}`. For `"csv"`: `{Dataset.OHLCV}`.
+Datasets that the configured provider can fetch. `"yahoo"` supports
+`{Dataset.OHLCV, Dataset.SHARES, Dataset.DIVIDENDS}`; `"tiingo"` additionally
+supports `Dataset.SPLITS`, `Dataset.FUNDAMENTALS_DAILY`, and
+`Dataset.FUNDAMENTALS_STATEMENTS`.
 
 ### Methods
 
@@ -145,7 +147,7 @@ The `Fetcher` signature is `(symbol, start, end) -> pl.LazyFrame`. OHLCV fetcher
 Register in `goblin.py`:
 
 ```python
-_SOURCES = {"yahoo": YahooSource, "csv": CSVSource, "mysource": MySource}
+_SOURCES = {"yahoo": YahooSource, "tiingo": TiingoSource, "mysource": MySource}
 ```
 
 ---
@@ -185,26 +187,6 @@ goblin = MarketGoblin(provider="tiingo", api_key="<TIINGO_API_KEY>", save_path="
 - **Classification:** direct GET against `/tiingo/fundamentals/meta` (paid; not wrapped by the Python client). Sector / industry strings are mapped to slugs (e.g. `"Information Technology"` → `"information-technology"`); constituent fields (`top_companies`, `etf_symbol`) stay at their dataclass defaults — Tiingo doesn't expose them.
 
 Transient failures are retried with exponential backoff (3 attempts, 1 s / 2 s delays). Empty-data `ValueError`s propagate immediately. The Tiingo REST API expects lowercase tickers in URL/query params; on-disk `symbol` columns are uppercase, matching the rest of the platform.
-
----
-
-## `CSVSource`
-
-Reads OHLCV data from local CSV files. Useful for backtesting or offline use. `Dataset.SHARES` and `Dataset.DIVIDENDS` are not supported and raise `ValueError` at the dispatch layer.
-
-Expected CSV columns: `date` (YYYY-MM-DD), `open`, `high`, `low`, `close`, `volume`, `symbol`. CSVs are assumed to hold a single price variant — pass `is_adjusted=True/False` to stamp the flag on every row.
-
-```python
-goblin = MarketGoblin(
-    provider="csv",
-    save_path="./data",
-    data_dir="./csv_files",
-    is_adjusted=True,
-)
-lf = goblin.fetch("AAPL", "2024-01-01", "2024-03-31")
-```
-
-Looks for `{data_dir}/AAPL.csv`.
 
 ---
 

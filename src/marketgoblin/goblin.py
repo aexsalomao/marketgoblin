@@ -1,5 +1,5 @@
 # MarketGoblin — public API facade.
-# Wraps a data source (Yahoo, CSV, ...) and optional DiskStorage, exposing
+# Wraps a data source (Yahoo, Tiingo, ...) and optional DiskStorage, exposing
 # fetch / load / fetch_many with validation, rate limiting, and logging.
 # Datasets (OHLCV, shares, dividends, ...) are dispatched at the source layer.
 
@@ -17,7 +17,6 @@ from marketgoblin._normalize import parse_dates as _parse_dates
 from marketgoblin.classification import Classification
 from marketgoblin.datasets import Dataset
 from marketgoblin.sources.base import BaseSource
-from marketgoblin.sources.csv_source import CSVSource
 from marketgoblin.sources.tiingo import TiingoSource
 from marketgoblin.sources.yahoo import YahooSource
 from marketgoblin.storage.disk import DiskStorage
@@ -27,7 +26,6 @@ logger = logging.getLogger(__name__)
 
 _SOURCES: dict[str, type[BaseSource]] = {
     "yahoo": YahooSource,
-    "csv": CSVSource,
     "tiingo": TiingoSource,
 }
 

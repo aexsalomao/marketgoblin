@@ -77,11 +77,11 @@ def test_supported_datasets_yahoo(goblin):
     assert Dataset.DIVIDENDS in goblin.supported_datasets
 
 
-def test_supported_datasets_csv(tmp_path):
-    g = MarketGoblin(provider="csv", data_dir=tmp_path)
-    assert Dataset.OHLCV in g.supported_datasets
-    assert Dataset.SHARES not in g.supported_datasets
-    assert Dataset.DIVIDENDS not in g.supported_datasets
+def test_supported_datasets_tiingo():
+    g = MarketGoblin(provider="tiingo")
+    assert Dataset.SPLITS in g.supported_datasets
+    assert Dataset.FUNDAMENTALS_DAILY in g.supported_datasets
+    assert Dataset.FUNDAMENTALS_STATEMENTS in g.supported_datasets
 
 
 def test_fetch_rejects_bad_dates(goblin):
@@ -94,10 +94,9 @@ def test_fetch_rejects_inverted_dates(goblin):
         goblin.fetch("AAPL", "2024-03-01", "2024-01-31")
 
 
-def test_fetch_rejects_unsupported_dataset_via_csv(tmp_path):
-    g = MarketGoblin(provider="csv", data_dir=tmp_path)
+def test_fetch_rejects_unsupported_dataset(goblin):
     with pytest.raises(ValueError, match="does not support dataset"):
-        g.fetch("AAPL", "2024-01-01", "2024-01-31", dataset=Dataset.SHARES)
+        goblin.fetch("AAPL", "2024-01-01", "2024-01-31", dataset=Dataset.SPLITS)
 
 
 def test_load_without_save_path_raises(goblin):

@@ -191,15 +191,6 @@ def test_fetch_metadata_retries_on_transient_error(source):
     assert call_count["n"] == 2
 
 
-# --- CSVSource does not support metadata ---
-
-
-def test_csv_source_fetch_metadata_raises():
-    goblin = MarketGoblin(provider="csv")
-    with pytest.raises(NotImplementedError):
-        goblin.fetch_metadata("AAPL")
-
-
 # --- MarketGoblin.fetch_metadata + load_metadata (disk round-trip) ---
 
 

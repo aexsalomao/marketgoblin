@@ -51,7 +51,7 @@ class MySource(BaseSource):
 
 ```python
 # src/marketgoblin/goblin.py
-_SOURCES = {"yahoo": YahooSource, "csv": CSVSource, "mysource": MySource}
+_SOURCES = {"yahoo": YahooSource, "tiingo": TiingoSource, "mysource": MySource}
 ```
 
 Per-dataset fetchers all share the `(symbol, start, end)` signature. OHLCV fetchers return a tidy stacked frame containing both adjusted and raw rows distinguished by `is_adjusted`.
