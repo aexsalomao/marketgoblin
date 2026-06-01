@@ -57,14 +57,20 @@ def main() -> int:
         ok += 1
 
         if i % 50 == 0:
-            logger.info("progress %d / %d (ok=%d miss=%d failed=%d)", i, len(tickers), ok, miss, failed)
+            logger.info(
+                "progress %d / %d (ok=%d miss=%d failed=%d)", i, len(tickers), ok, miss, failed
+            )
 
     df = pl.DataFrame(rows, schema={"ticker": pl.String, "sector": pl.String})
     args.sector_map_out.parent.mkdir(parents=True, exist_ok=True)
     df.write_parquet(args.sector_map_out)
     logger.info(
         "wrote %d rows to %s (ok=%d miss=%d failed=%d)",
-        df.height, args.sector_map_out, ok, miss, failed,
+        df.height,
+        args.sector_map_out,
+        ok,
+        miss,
+        failed,
     )
     return 0
 

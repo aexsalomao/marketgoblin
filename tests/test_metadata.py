@@ -68,9 +68,7 @@ def make_fundamentals_daily_chunk() -> pl.DataFrame:
         {
             "date": pl.Series([20240102, 20240103], dtype=pl.Int32),
             "market_cap": pl.Series([1_500_000_000_000, 1_650_000_000_000], dtype=pl.Int64),
-            "enterprise_val": pl.Series(
-                [1_550_000_000_000, 1_700_000_000_000], dtype=pl.Int64
-            ),
+            "enterprise_val": pl.Series([1_550_000_000_000, 1_700_000_000_000], dtype=pl.Int64),
             "pe_ratio": pl.Series([32.5, 32.6], dtype=pl.Float32),
             "pb_ratio": pl.Series([50.0, 50.1], dtype=pl.Float32),
             "trailing_peg_1y": pl.Series([2.0, 2.0], dtype=pl.Float32),
@@ -301,9 +299,7 @@ def test_build_splits_omits_ohlcv_only_keys(fake_pq):
 
 
 def test_build_fundamentals_daily_has_all_keys(fake_pq):
-    meta = build_fundamentals_daily(
-        make_fundamentals_daily_chunk(), "tiingo", "AAPL", "2024-01", 0
-    )
+    meta = build_fundamentals_daily(make_fundamentals_daily_chunk(), "tiingo", "AAPL", "2024-01", 0)
     expected = {
         "symbol",
         "provider",
@@ -323,9 +319,7 @@ def test_build_fundamentals_daily_has_all_keys(fake_pq):
 
 
 def test_build_fundamentals_daily_stats(fake_pq):
-    meta = build_fundamentals_daily(
-        make_fundamentals_daily_chunk(), "tiingo", "AAPL", "2024-01", 0
-    )
+    meta = build_fundamentals_daily(make_fundamentals_daily_chunk(), "tiingo", "AAPL", "2024-01", 0)
     assert meta["symbol"] == "AAPL"
     assert meta["row_count"] == 2
     assert meta["start_date"] == 20240102
@@ -354,9 +348,7 @@ def test_build_fundamentals_daily_handles_null_metrics(fake_pq):
 
 
 def test_build_fundamentals_statements_has_all_keys(fake_pq):
-    meta = build_fundamentals_statements(
-        make_statements_chunk(), "tiingo", "AAPL", "2024-08", 0
-    )
+    meta = build_fundamentals_statements(make_statements_chunk(), "tiingo", "AAPL", "2024-08", 0)
     expected = {
         "symbol",
         "provider",
@@ -376,9 +368,7 @@ def test_build_fundamentals_statements_has_all_keys(fake_pq):
 
 
 def test_build_fundamentals_statements_stats(fake_pq):
-    meta = build_fundamentals_statements(
-        make_statements_chunk(), "tiingo", "AAPL", "2024-08", 0
-    )
+    meta = build_fundamentals_statements(make_statements_chunk(), "tiingo", "AAPL", "2024-08", 0)
     assert meta["symbol"] == "AAPL"
     assert meta["row_count"] == 2
     assert meta["start_date"] == 20240502

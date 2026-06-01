@@ -61,9 +61,7 @@ def make_fundamentals_daily_lf() -> pl.LazyFrame:
         {
             "date": pl.Series([20240102, 20240201], dtype=pl.Int32),
             "market_cap": pl.Series([1_500_000_000_000, 1_700_000_000_000], dtype=pl.Int64),
-            "enterprise_val": pl.Series(
-                [1_550_000_000_000, 1_750_000_000_000], dtype=pl.Int64
-            ),
+            "enterprise_val": pl.Series([1_550_000_000_000, 1_750_000_000_000], dtype=pl.Int64),
             "pe_ratio": pl.Series([32.5, 33.0], dtype=pl.Float32),
             "pb_ratio": pl.Series([50.0, 50.5], dtype=pl.Float32),
             "trailing_peg_1y": pl.Series([2.0, 2.1], dtype=pl.Float32),
@@ -282,19 +280,13 @@ def test_load_splits_parse_dates(storage):
 
 def test_save_fundamentals_daily_creates_pq_files(storage, tmp_path):
     storage.save("tiingo", "AAPL", Dataset.FUNDAMENTALS_DAILY, make_fundamentals_daily_lf())
-    assert (
-        tmp_path / "tiingo" / "fundamentals_daily" / "AAPL" / "AAPL_2024-01.pq"
-    ).exists()
-    assert (
-        tmp_path / "tiingo" / "fundamentals_daily" / "AAPL" / "AAPL_2024-02.pq"
-    ).exists()
+    assert (tmp_path / "tiingo" / "fundamentals_daily" / "AAPL" / "AAPL_2024-01.pq").exists()
+    assert (tmp_path / "tiingo" / "fundamentals_daily" / "AAPL" / "AAPL_2024-02.pq").exists()
 
 
 def test_save_fundamentals_daily_creates_sidecars(storage, tmp_path):
     storage.save("tiingo", "AAPL", Dataset.FUNDAMENTALS_DAILY, make_fundamentals_daily_lf())
-    sidecar = (
-        tmp_path / "tiingo" / "fundamentals_daily" / "AAPL" / "AAPL_2024-01.json"
-    )
+    sidecar = tmp_path / "tiingo" / "fundamentals_daily" / "AAPL" / "AAPL_2024-01.json"
     assert sidecar.exists()
 
 
@@ -342,9 +334,7 @@ def test_save_statements_creates_pq_files(storage, tmp_path):
 
 def test_save_statements_creates_sidecars(storage, tmp_path):
     storage.save("tiingo", "AAPL", Dataset.FUNDAMENTALS_STATEMENTS, make_statements_lf())
-    sidecar = (
-        tmp_path / "tiingo" / "fundamentals_statements" / "AAPL" / "AAPL_2024-05.json"
-    )
+    sidecar = tmp_path / "tiingo" / "fundamentals_statements" / "AAPL" / "AAPL_2024-05.json"
     assert sidecar.exists()
 
 

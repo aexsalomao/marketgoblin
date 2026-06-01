@@ -135,9 +135,7 @@ def make_raw_fundamentals_daily() -> pl.LazyFrame:
         {
             "date": [date(2024, 1, 2), date(2024, 1, 3)],
             "market_cap": pl.Series([1_500_000_000_000, 1_650_000_000_000], dtype=pl.Int64),
-            "enterprise_val": pl.Series(
-                [1_550_000_000_000, 1_700_000_000_000], dtype=pl.Int64
-            ),
+            "enterprise_val": pl.Series([1_550_000_000_000, 1_700_000_000_000], dtype=pl.Int64),
             "pe_ratio": pl.Series([32.5, 32.6], dtype=pl.Float64),
             "pb_ratio": pl.Series([50.0, 50.1], dtype=pl.Float64),
             "trailing_peg_1y": pl.Series([2.0, 2.0], dtype=pl.Float64),

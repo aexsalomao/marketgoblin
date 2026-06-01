@@ -97,9 +97,7 @@ with tempfile.TemporaryDirectory() as tmp:
     # 7. Splits fetch — event-driven (rare; one row per actual split)
     # -----------------------------------------------------------------------
     print("\n=== 7. Splits fetch (AAPL) ===")
-    splits_df = goblin.fetch(
-        "AAPL", START, END, dataset=Dataset.SPLITS, parse_dates=True
-    ).collect()
+    splits_df = goblin.fetch("AAPL", START, END, dataset=Dataset.SPLITS, parse_dates=True).collect()
     print(splits_df)
     print(f"Schema: {splits_df.schema}")
 

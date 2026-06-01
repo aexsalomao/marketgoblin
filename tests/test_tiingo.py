@@ -791,9 +791,7 @@ def test_fetch_fundamentals_daily_returns_normalized_frame(source):
     with patch.object(
         source._client, "get_fundamentals_daily", return_value=_make_fundamentals_rows()
     ):
-        df = source.fetch(
-            Dataset.FUNDAMENTALS_DAILY, "AAPL", "2024-01-01", "2024-01-31"
-        ).collect()
+        df = source.fetch(Dataset.FUNDAMENTALS_DAILY, "AAPL", "2024-01-01", "2024-01-31").collect()
     assert df.schema["date"] == pl.Int32
     assert df.schema["market_cap"] == pl.Int64
     assert df.schema["enterprise_val"] == pl.Int64
@@ -807,9 +805,7 @@ def test_fetch_fundamentals_daily_uppercases_symbol_in_output(source):
     with patch.object(
         source._client, "get_fundamentals_daily", return_value=_make_fundamentals_rows()
     ):
-        df = source.fetch(
-            Dataset.FUNDAMENTALS_DAILY, "aapl", "2024-01-01", "2024-01-31"
-        ).collect()
+        df = source.fetch(Dataset.FUNDAMENTALS_DAILY, "aapl", "2024-01-01", "2024-01-31").collect()
     assert df["symbol"].unique().to_list() == ["AAPL"]
 
 
@@ -822,7 +818,8 @@ def test_fetch_fundamentals_daily_empty_raises(source):
 
 
 def _statements_side_effect(
-    *args: Any, **kwargs: Any,
+    *args: Any,
+    **kwargs: Any,
 ) -> list[dict[str, Any]]:
     """Mock side_effect: return as-reported or adjusted payload depending on
     the asReported kwarg the source sends."""
@@ -837,9 +834,7 @@ def test_fetch_statements_lowercases_symbol_for_api(source):
         "get_fundamentals_statements",
         side_effect=_statements_side_effect,
     ) as mock:
-        source.fetch(
-            Dataset.FUNDAMENTALS_STATEMENTS, "AAPL", "2022-01-01", "2024-12-31"
-        ).collect()
+        source.fetch(Dataset.FUNDAMENTALS_STATEMENTS, "AAPL", "2022-01-01", "2024-12-31").collect()
     # Both calls (asReported=True and asReported=False) lowercase the symbol
     assert all(call.args[0] == "aapl" for call in mock.call_args_list)
 
@@ -850,9 +845,7 @@ def test_fetch_statements_calls_both_as_reported_variants(source):
         "get_fundamentals_statements",
         side_effect=_statements_side_effect,
     ) as mock:
-        source.fetch(
-            Dataset.FUNDAMENTALS_STATEMENTS, "AAPL", "2022-01-01", "2024-12-31"
-        ).collect()
+        source.fetch(Dataset.FUNDAMENTALS_STATEMENTS, "AAPL", "2022-01-01", "2024-12-31").collect()
     # The dataset always fetches both variants — one call with asReported=True
     # (point-in-time) and one with asReported=False (latest restated).
     as_reported_flags = [call.kwargs["asReported"] for call in mock.call_args_list]

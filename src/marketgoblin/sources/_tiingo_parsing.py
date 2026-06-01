@@ -358,8 +358,8 @@ def statements_rows_to_lf(
 def _empty_variant_lf(suffix: str) -> pl.LazyFrame:
     """Empty frame with the wire schema — used when one variant returned no
     rows so the outer join still has both sides to operate on."""
-    return pl.from_dicts([], schema=_statements_wire_schema(suffix)).lazy().pipe(
-        parse_tiingo_date_col
+    return (
+        pl.from_dicts([], schema=_statements_wire_schema(suffix)).lazy().pipe(parse_tiingo_date_col)
     )
 
 

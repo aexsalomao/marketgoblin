@@ -169,9 +169,7 @@ class TiingoSource(BaseSource):
 
         return self._retry_fetch(do_fetch, symbol)
 
-    def _fetch_fundamentals_statements(
-        self, symbol: str, start: str, end: str
-    ) -> pl.LazyFrame:
+    def _fetch_fundamentals_statements(self, symbol: str, start: str, end: str) -> pl.LazyFrame:
         # Tiingo's statements endpoint exposes asReported as a request flag,
         # not as separate columns in one response — to ship both variants in
         # the same on-disk slice we issue both calls and merge in the parser.
@@ -198,9 +196,9 @@ class TiingoSource(BaseSource):
 
         as_reported_rows = self._retry_fetch(fetch_as_reported, symbol)
         adjusted_rows = self._retry_fetch(fetch_adjusted, symbol)
-        return statements_rows_to_lf(
-            as_reported_rows, adjusted_rows, symbol
-        ).pipe(normalize_statements)
+        return statements_rows_to_lf(as_reported_rows, adjusted_rows, symbol).pipe(
+            normalize_statements
+        )
 
     def fetch_metadata(self, symbol: str, *, fast: bool = False) -> TickerMetadata:
         """Build a unified TickerMetadata from Tiingo's metadata + daily fundamentals.

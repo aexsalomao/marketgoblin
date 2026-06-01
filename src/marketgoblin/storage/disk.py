@@ -165,9 +165,7 @@ class DiskStorage:
         if dataset == Dataset.SPLITS:
             return _build_splits_metadata(chunk, provider, symbol, ym, file_size_bytes)
         if dataset == Dataset.FUNDAMENTALS_DAILY:
-            return _build_fundamentals_daily_metadata(
-                chunk, provider, symbol, ym, file_size_bytes
-            )
+            return _build_fundamentals_daily_metadata(chunk, provider, symbol, ym, file_size_bytes)
         if dataset == Dataset.FUNDAMENTALS_STATEMENTS:
             return _build_fundamentals_statements_metadata(
                 chunk, provider, symbol, ym, file_size_bytes
