@@ -47,6 +47,8 @@ class _RateLimiter:
     """Token-bucket rate limiter safe for use across threads."""
 
     def __init__(self, requests_per_second: float) -> None:
+        if requests_per_second <= 0:
+            raise ValueError(f"requests_per_second must be positive. Got {requests_per_second}")
         self._interval = 1.0 / requests_per_second
         self._last: float = 0.0
         self._lock = threading.Lock()
