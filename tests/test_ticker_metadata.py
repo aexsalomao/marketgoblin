@@ -184,7 +184,7 @@ def test_fetch_metadata_retries_on_transient_error(source):
 
     with (
         patch("marketgoblin.sources.yahoo.yf.Ticker", side_effect=flaky),
-        patch("marketgoblin.sources.yahoo.time.sleep"),
+        patch("marketgoblin.sources.base.time.sleep"),
     ):
         meta = source.fetch_metadata("AAPL")
     assert meta.symbol == "AAPL"

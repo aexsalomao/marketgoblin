@@ -4,11 +4,8 @@
 # one call, so OHLCV and DIVIDENDS share the underlying request shape.
 # Pure parsing / Tiingo-adapter helpers live in _tiingo_parsing.
 
-import logging
 import os
-import time
-from collections.abc import Callable
-from typing import Any, TypeVar
+from typing import Any
 
 import polars as pl
 from tiingo import TiingoClient
@@ -38,13 +35,6 @@ from marketgoblin.sources._tiingo_parsing import (
 )
 from marketgoblin.sources.base import BaseSource, Fetcher
 from marketgoblin.ticker_metadata import TickerMetadata
-
-logger = logging.getLogger(__name__)
-
-_MAX_RETRIES = 3
-_RETRY_DELAYS = [1.0, 2.0]  # seconds between attempts (len == _MAX_RETRIES - 1)
-
-_T = TypeVar("_T")
 
 
 class TiingoSource(BaseSource):
@@ -245,35 +235,3 @@ class TiingoSource(BaseSource):
             )
 
         return self._retry_fetch(do_fetch, symbol)
-
-    def _retry_fetch(
-        self,
-        fetch_fn: Callable[[], _T],
-        symbol: str,
-    ) -> _T:
-        """Retry fetch_fn on transient errors with exponential backoff. ValueError propagates."""
-        last_exc: Exception = RuntimeError("unreachable")
-        for attempt in range(1, _MAX_RETRIES + 1):
-            try:
-                return fetch_fn()
-            except ValueError:
-                raise  # domain validation — don't retry
-            except Exception as exc:
-                last_exc = exc
-                logger.warning(
-                    "fetch attempt %d/%d failed | symbol=%s error=%s",
-                    attempt,
-                    _MAX_RETRIES,
-                    symbol,
-                    exc,
-                )
-                if attempt < _MAX_RETRIES:
-                    time.sleep(_RETRY_DELAYS[attempt - 1])
-
-        logger.error(
-            "all %d fetch attempts failed | symbol=%s error=%s",
-            _MAX_RETRIES,
-            symbol,
-            last_exc,
-        )
-        raise last_exc

@@ -1,3 +1,4 @@
+import json
 from datetime import date
 
 import polars as pl
@@ -432,3 +433,75 @@ def test_load_statements_parse_dates(storage, statements_lf):
     ).collect()
     assert df.schema["date"] == pl.Date
     assert sorted(df["date"].to_list()) == [date(2024, 5, 2), date(2024, 8, 1)]
+
+
+def make_trades_lf() -> pl.LazyFrame:
+    # Two trades in Jan + two in Feb 2024 — exercises monthly slicing for an
+    # intraday dataset whose canonical axis is the nanosecond timestamp.
+    return pl.DataFrame(
+        {
+            "date": pl.Series([20240102, 20240102, 20240201, 20240201], dtype=pl.Int32),
+            "timestamp": pl.Series(
+                [
+                    "2024-01-02T14:30:00Z",
+                    "2024-01-02T14:30:01Z",
+                    "2024-02-01T14:30:00Z",
+                    "2024-02-01T14:30:01Z",
+                ]
+            ).str.to_datetime(time_unit="ns", time_zone="UTC"),
+            "symbol": ["SPY"] * 4,
+            "exchange": ["V", "V", "D", "D"],
+            "price": pl.Series([475.0, 475.1, 480.0, 480.2], dtype=pl.Float32),
+            "size": pl.Series([100, 50, 200, 75], dtype=pl.Int64),
+            "conditions": [["@"], ["@", "I"], ["@"], ["@"]],
+            "trade_id": pl.Series([1, 2, 3, 4], dtype=pl.Int64),
+            "tape": ["B", "B", "B", "B"],
+        }
+    ).lazy()
+
+
+def test_save_trades_creates_monthly_pq_files(storage, tmp_path):
+    storage.save("alpaca", "SPY", Dataset.TRADES, make_trades_lf())
+    assert (tmp_path / "alpaca" / "trades" / "SPY" / "SPY_2024-01.pq").exists()
+    assert (tmp_path / "alpaca" / "trades" / "SPY" / "SPY_2024-02.pq").exists()
+
+
+def test_load_trades_round_trips_schema(storage):
+    storage.save("alpaca", "SPY", Dataset.TRADES, make_trades_lf())
+    df = storage.load("alpaca", "SPY", Dataset.TRADES, "2024-01-01", "2024-12-31").collect()
+    assert df.schema["date"] == pl.Int32
+    assert df.schema["timestamp"] == pl.Datetime(time_unit="ns", time_zone="UTC")
+    assert df.schema["price"] == pl.Float32
+    assert df.schema["size"] == pl.Int64
+
+
+def test_load_trades_filters_date_range(storage):
+    storage.save("alpaca", "SPY", Dataset.TRADES, make_trades_lf())
+    df = storage.load("alpaca", "SPY", Dataset.TRADES, "2024-01-01", "2024-01-31").collect()
+    assert len(df) == 2
+    assert set(df["date"].to_list()) == {20240102}
+
+
+def test_trades_sidecar_records_total_volume(storage, tmp_path):
+    storage.save("alpaca", "SPY", Dataset.TRADES, make_trades_lf())
+    sidecar = tmp_path / "alpaca" / "trades" / "SPY" / "SPY_2024-01.json"
+    meta = json.loads(sidecar.read_text())
+    assert meta["volume_total"] == 150  # Jan sizes: 100 + 50
+    assert meta["row_count"] == 2
+
+
+def test_save_trades_overlapping_window_preserves_existing_ticks(storage):
+    # Regression: re-saving a SUBSET of a day's trades must NOT evict the rest.
+    storage.save("alpaca", "SPY", Dataset.TRADES, make_trades_lf())
+    subset = make_trades_lf().filter(pl.col("trade_id") == 1)  # a thinner re-fetch
+    storage.save("alpaca", "SPY", Dataset.TRADES, subset)
+    df = storage.load("alpaca", "SPY", Dataset.TRADES, "2024-01-01", "2024-01-31").collect()
+    assert sorted(df["trade_id"].to_list()) == [1, 2]  # trade_id 2 survived the re-save
+
+
+def test_save_trades_dedups_identical_executions(storage):
+    # Saving the same trades twice must not duplicate them (trades are immutable).
+    storage.save("alpaca", "SPY", Dataset.TRADES, make_trades_lf())
+    storage.save("alpaca", "SPY", Dataset.TRADES, make_trades_lf())
+    df = storage.load("alpaca", "SPY", Dataset.TRADES, "2024-01-01", "2024-12-31").collect()
+    assert df.height == 4  # 2 Jan + 2 Feb, no duplicates

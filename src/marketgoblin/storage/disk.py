@@ -19,6 +19,7 @@ from marketgoblin._metadata import (
 from marketgoblin._metadata import build_ohlcv as _build_ohlcv_metadata
 from marketgoblin._metadata import build_shares as _build_shares_metadata
 from marketgoblin._metadata import build_splits as _build_splits_metadata
+from marketgoblin._metadata import build_trades as _build_trades_metadata
 from marketgoblin._metadata import write as _write_metadata
 from marketgoblin._normalize import parse_dates as _parse_dates
 from marketgoblin.classification import Classification
@@ -72,7 +73,7 @@ class DiskStorage:
             chunk = df.filter(pl.col("_ym") == ym).drop("_ym").sort("date")
             path = self._slice_path(provider, symbol, dataset, ym)
             path.parent.mkdir(parents=True, exist_ok=True)
-            chunk = self._merge_existing(chunk, path)
+            chunk = self._merge_existing(chunk, path, dataset)
             self._atomic_write(chunk, path)
             meta = self._build_metadata(chunk, provider, symbol, dataset, ym, path.stat().st_size)
             _write_metadata(meta, path.with_suffix(".json"))
@@ -179,17 +180,21 @@ class DiskStorage:
             return _build_fundamentals_statements_metadata(
                 chunk, provider, symbol, ym, file_size_bytes
             )
+        if dataset == Dataset.TRADES:
+            return _build_trades_metadata(chunk, provider, symbol, ym, file_size_bytes)
         return _build_shares_metadata(chunk, provider, symbol, ym, file_size_bytes)
 
-    def _merge_existing(self, chunk: pl.DataFrame, path: Path) -> pl.DataFrame:
+    def _merge_existing(self, chunk: pl.DataFrame, path: Path, dataset: Dataset) -> pl.DataFrame:
         """Union an incoming month chunk with the slice already at ``path``, new rows winning.
 
         Keeps existing rows the incoming frame does not cover (a partial-range fetch
         must not erase the rest of the month) and takes the incoming rows wherever
         identities overlap. Row identity is ``(date, is_adjusted)`` for stacked OHLCV
-        and plain ``date`` otherwise — keying on date alone would evict the untouched
-        variant when a chunk carries only one. An unreadable existing slice falls back
-        to plain replacement.
+        and plain ``date`` for the daily datasets (one row per date). TRADES is
+        intraday — many rows share a ``date`` — so it dedups on full per-trade
+        identity instead; keying on ``date`` alone would evict a whole day's ticks
+        when a re-fetch returns only a subset. An unreadable existing slice falls
+        back to plain replacement.
         """
         if not path.exists():
             return chunk
@@ -198,6 +203,16 @@ class DiskStorage:
         except Exception:  # noqa: BLE001 - corrupt slice -> rewrite it from the fresh fetch
             logger.warning("unreadable slice %s; replacing with fetched rows", path.name)
             return chunk
+
+        if dataset == Dataset.TRADES:
+            # Trades are immutable, append-only executions: union and drop exact
+            # duplicates on per-trade identity. `conditions` is list-typed (not a
+            # valid dedup key) and is fully determined by the scalar identity, so
+            # exclude it. keep="last" lets a re-fetch win on an exact-identity match.
+            combined = pl.concat([existing, chunk], how="vertical_relaxed")
+            identity = [c for c in combined.columns if c != "conditions"]
+            return combined.unique(subset=identity, keep="last").sort(["date", "timestamp"])
+
         keys = (
             ["date", "is_adjusted"]
             if "is_adjusted" in chunk.columns and "is_adjusted" in existing.columns

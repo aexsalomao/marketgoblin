@@ -291,6 +291,56 @@ def build_fundamentals_statements(
     }
 
 
+def build_trades(
+    chunk: pl.DataFrame,
+    provider: str,
+    symbol: str,
+    ym: str,
+    file_size_bytes: int,
+    currency: str = "USD",
+) -> dict[str, Any]:
+    """Build a metadata dict for a saved trades (tick) parquet slice.
+
+    Trades are intraday and event-dense (thousands–millions of rows per month),
+    so there is no expected/missing-day analysis. Coverage is summarized by the
+    nanosecond timestamp span, the count of distinct trading days, and price /
+    total-volume bounds. ``volume_total`` sums per-trade ``size`` — on a partial
+    (e.g. IEX-only) feed this is a fraction of consolidated volume by design.
+    """
+    stats = chunk.select(
+        [
+            pl.col("date").min().alias("start_date"),
+            pl.col("date").max().alias("end_date"),
+            pl.len().alias("row_count"),
+            pl.col("date").n_unique().alias("unique_days"),
+            pl.col("timestamp").min().alias("first_trade_at"),
+            pl.col("timestamp").max().alias("last_trade_at"),
+            pl.col("price").min().alias("price_min"),
+            pl.col("price").max().alias("price_max"),
+            pl.col("size").sum().alias("volume_total"),
+        ]
+    ).row(0, named=True)
+
+    return {
+        "symbol": symbol,
+        "provider": provider,
+        "year_month": ym,
+        "row_count": stats["row_count"],
+        "unique_days": stats["unique_days"],
+        "start_date": stats["start_date"],
+        "end_date": stats["end_date"],
+        "first_trade_at": str(stats["first_trade_at"]),
+        "last_trade_at": str(stats["last_trade_at"]),
+        "columns": chunk.columns,
+        "downloaded_at": datetime.now().isoformat(timespec="seconds"),
+        "file_size_bytes": file_size_bytes,
+        "currency": currency,
+        "price_min": float(stats["price_min"]),
+        "price_max": float(stats["price_max"]),
+        "volume_total": int(stats["volume_total"]),
+    }
+
+
 def _safe_int(value: Any) -> int | None:
     return int(value) if value is not None else None
 

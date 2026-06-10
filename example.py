@@ -13,6 +13,7 @@ Demonstrates:
 
 import json
 import logging
+import os
 import tempfile
 from pathlib import Path
 
@@ -125,3 +126,16 @@ with tempfile.TemporaryDirectory() as tmp:
         ).collect()
         print(statements_df)
         print(f"Schema: {statements_df.schema}")
+
+    # -----------------------------------------------------------------------
+    # 10. Intraday trades (tick) — Alpaca-only; needs ALPACA_API_KEY/SECRET.
+    #     One trading day only: a month of ticks is millions of rows.
+    # -----------------------------------------------------------------------
+    if os.environ.get("ALPACA_API_KEY") and os.environ.get("ALPACA_API_SECRET"):
+        print("\n=== 10. Intraday trades fetch (SPY, Alpaca) ===")
+        alpaca = MarketGoblin(provider="alpaca", save_path=save_path)
+        trades_df = alpaca.fetch(
+            "SPY", "2024-03-01", "2024-03-02", dataset=Dataset.TRADES, parse_dates=True
+        ).collect()
+        print(trades_df.head())
+        print(f"Rows: {trades_df.height}  Schema: {trades_df.schema}")
