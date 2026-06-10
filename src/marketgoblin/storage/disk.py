@@ -51,8 +51,9 @@ class DiskStorage:
         """Split by month and atomically write one .pq file per month.
 
         Each month slice is MERGED with any rows already on disk: existing rows
-        whose date is not covered by the incoming frame are kept, and incoming
-        rows win on overlapping dates (vendor restatements replace stale bars).
+        the incoming frame does not cover are kept, and incoming rows win where
+        identities overlap (vendor restatements replace stale bars). Row identity
+        is ``(date, is_adjusted)`` for stacked OHLCV, plain ``date`` otherwise.
         A partial-range fetch therefore never erases the rest of a month — only
         deleting the slice file discards history.
         """
@@ -181,11 +182,14 @@ class DiskStorage:
         return _build_shares_metadata(chunk, provider, symbol, ym, file_size_bytes)
 
     def _merge_existing(self, chunk: pl.DataFrame, path: Path) -> pl.DataFrame:
-        """Union an incoming month chunk with the slice already at ``path``, new dates winning.
+        """Union an incoming month chunk with the slice already at ``path``, new rows winning.
 
-        Keeps existing rows for dates the incoming frame does not cover (a partial-range
-        fetch must not erase the rest of the month) and takes the incoming rows wherever
-        dates overlap. An unreadable existing slice falls back to plain replacement.
+        Keeps existing rows the incoming frame does not cover (a partial-range fetch
+        must not erase the rest of the month) and takes the incoming rows wherever
+        identities overlap. Row identity is ``(date, is_adjusted)`` for stacked OHLCV
+        and plain ``date`` otherwise — keying on date alone would evict the untouched
+        variant when a chunk carries only one. An unreadable existing slice falls back
+        to plain replacement.
         """
         if not path.exists():
             return chunk
@@ -194,10 +198,15 @@ class DiskStorage:
         except Exception:  # noqa: BLE001 - corrupt slice -> rewrite it from the fresh fetch
             logger.warning("unreadable slice %s; replacing with fetched rows", path.name)
             return chunk
-        kept = existing.filter(~pl.col("date").is_in(chunk["date"].implode()))
+        keys = (
+            ["date", "is_adjusted"]
+            if "is_adjusted" in chunk.columns and "is_adjusted" in existing.columns
+            else ["date"]
+        )
+        kept = existing.join(chunk.select(keys), on=keys, how="anti")
         if kept.is_empty():
             return chunk
-        return pl.concat([kept, chunk], how="vertical_relaxed").sort("date")
+        return pl.concat([kept, chunk], how="vertical_relaxed").sort(keys)
 
     def _atomic_write(self, df: pl.DataFrame, path: Path) -> None:
         tmp = path.with_suffix(".tmp")

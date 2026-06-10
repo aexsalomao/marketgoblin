@@ -66,6 +66,12 @@ def test_fetch_many_empty_symbols(goblin):
     assert results == {}
 
 
+@pytest.mark.parametrize("rate", [0, -1.0], ids=["zero", "negative"])
+def test_fetch_many_rejects_non_positive_rate(goblin, rate):
+    with pytest.raises(ValueError, match="requests_per_second"):
+        goblin.fetch_many(["AAPL"], "2024-01-01", "2024-01-31", requests_per_second=rate)
+
+
 def test_unknown_provider_raises():
     with pytest.raises(ValueError, match="Unknown provider"):
         MarketGoblin(provider="bloomberg")

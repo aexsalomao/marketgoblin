@@ -282,6 +282,20 @@ def test_save_overlapping_dates_take_new_rows(storage):
     assert untouched["close"][0] == 186.0  # the uncovered date survived verbatim
 
 
+def test_save_single_variant_preserves_other_variant(storage):
+    # Regression: merge identity for stacked OHLCV is (date, is_adjusted) — a chunk
+    # carrying only the adjusted rows must not evict the raw rows for those dates.
+    storage.save("yahoo", "AAPL", Dataset.OHLCV, make_ohlcv_lf())
+    adjusted_only = make_ohlcv_partial_lf().filter(pl.col("is_adjusted"))
+    storage.save("yahoo", "AAPL", Dataset.OHLCV, adjusted_only)
+    df = storage.load("yahoo", "AAPL", Dataset.OHLCV, "2024-01-01", "2024-01-31").collect()
+    raw_kept = df.filter((pl.col("date") == 20240103) & ~pl.col("is_adjusted"))
+    assert len(raw_kept) == 1
+    assert raw_kept["close"][0] == pytest.approx(187.0)  # raw variant survived
+    restated = df.filter((pl.col("date") == 20240103) & pl.col("is_adjusted"))
+    assert restated["close"][0] == pytest.approx(999.0)  # adjusted variant restated
+
+
 def test_save_partial_month_leaves_other_months_alone(storage):
     storage.save("yahoo", "AAPL", Dataset.OHLCV, make_ohlcv_lf())
     storage.save("yahoo", "AAPL", Dataset.OHLCV, make_ohlcv_partial_lf())

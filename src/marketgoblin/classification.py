@@ -56,8 +56,12 @@ class Classification(JSONSerializable):
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Self:
-        sector = SectorProfile.from_dict(data["sector"]) if data.get("sector") else None
-        industry = IndustryProfile.from_dict(data["industry"]) if data.get("industry") else None
+        sector = SectorProfile.from_dict(data["sector"]) if data.get("sector") is not None else None
+        industry = (
+            IndustryProfile.from_dict(data["industry"])
+            if data.get("industry") is not None
+            else None
+        )
         return cls(
             symbol=data["symbol"],
             sector=sector,

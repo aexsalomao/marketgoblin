@@ -92,6 +92,13 @@ def test_classification_handles_missing_subprofiles():
     assert restored.industry is None
 
 
+def test_classification_from_dict_fails_loud_on_malformed_subprofile():
+    # An empty sector dict is corruption (missing required `key`), not "no sector" —
+    # it must raise instead of silently degrading to None.
+    with pytest.raises(TypeError):
+        Classification.from_dict({"symbol": "AAPL", "sector": {}, "industry": None})
+
+
 def test_sector_profile_from_dict_ignores_unknown_keys():
     data = {"key": "technology", "name": "Tech", "stray": "ignore"}
     restored = SectorProfile.from_dict(data)
