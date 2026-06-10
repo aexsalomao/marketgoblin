@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-06-10
+
+### Changed
+- `DiskStorage.save()` now **merges** each month slice with the rows already on disk instead of replacing the whole slice: existing rows the incoming frame doesn't cover are kept, and incoming rows win where identities overlap (vendor restatements replace stale bars). A partial-range fetch no longer erases the rest of a month — only deleting the slice file discards history
+- `marketgoblin.__version__` is now derived from the installed package metadata (single source of truth: the `pyproject.toml` version) so it can't drift from the released artifact; falls back to `0.0.0+unknown` when run from an uninstalled source tree
+
+### Fixed
+- `DiskStorage` slice merge keyed on `date` alone, so a chunk carrying only one OHLCV variant (`is_adjusted` True/False) evicted both existing rows for that date and silently dropped the untouched variant. The merge now keys on `(date, is_adjusted)` for stacked OHLCV
+- `MarketGoblin.fetch_many(requests_per_second=0)` raised a bare `ZeroDivisionError`, and a negative rate silently disabled limiting; `_RateLimiter` now rejects non-positive rates with a clear `ValueError`
+- `Classification.from_dict` coerced a malformed empty sub-profile dict (`{}`) to `None` via a truthiness check instead of failing loud; it now uses explicit `is not None` checks
+
 ## [0.5.1] - 2026-06-01
 
 ### Fixed
