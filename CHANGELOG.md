@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-06-10
+
+### Added
+- **Alpaca provider** (`MarketGoblin(provider="alpaca")`) — fourth data source, backed by Alpaca's Data API v2 REST endpoint, exposing the new `Dataset.TRADES`
+- `Dataset.TRADES` — intraday tick-by-tick trades (nanosecond UTC `timestamp`, `price`, `size`, `exchange`, `conditions`, `trade_id`, `tape`). The on-disk int32 `date` is derived from the **US/Eastern** trading-session date so extended-hours prints that cross UTC midnight land on the correct day and monthly slice. Credentials resolve from `ALPACA_API_KEY` / `ALPACA_API_SECRET`; the free IEX feed is the default (`feed="iex"`), `feed="sip"` for the paid consolidated tape
+- `normalize_trades` / `build_trades` and the pure `trades_rows_to_lf` parser for the new dataset
+
+### Changed
+- `DiskStorage._merge_existing` is now dataset-aware: `TRADES` slices dedup on full per-trade identity instead of the calendar `date` key, so a partial-day re-fetch unions ticks rather than evicting the rest of the day
+- Hoisted the shared `_retry_fetch` transient-error retry helper into `BaseSource`, removing the duplicated copies from the Yahoo, Tiingo, and Alpaca sources
+
+### Fixed
+- `trades_rows_to_lf` now backfills optional trade fields (`conditions`, `trade_id`, ...) absent from an entire page as typed nulls instead of raising `ColumnNotFoundError` on sparse (e.g. IEX) feeds
+
 ## [0.6.0] - 2026-06-10
 
 ### Changed
