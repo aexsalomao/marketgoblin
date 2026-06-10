@@ -10,8 +10,97 @@ from marketgoblin._normalize import (
     normalize_shares,
     normalize_splits,
     normalize_statements,
+    normalize_trades,
     parse_dates,
 )
+
+
+def make_raw_trades() -> pl.LazyFrame:
+    # Timestamps deliberately out of order to exercise the sort.
+    return pl.DataFrame(
+        {
+            "timestamp": pl.Series(
+                [
+                    "2026-05-01T13:30:01Z",
+                    "2026-05-01T13:30:00Z",
+                    "2026-05-04T14:00:00Z",
+                ]
+            ).str.to_datetime(time_unit="ns", time_zone="UTC"),
+            "symbol": ["SPY", "SPY", "SPY"],
+            "exchange": ["V", "V", "D"],
+            "price": pl.Series([500.2, 500.1, 501.0], dtype=pl.Float64),
+            "size": pl.Series([50, 100, 200], dtype=pl.Int64),
+            "conditions": [["@"], ["@", "I"], ["@"]],
+            "trade_id": pl.Series([2, 1, 3], dtype=pl.Int64),
+            "tape": ["B", "B", "B"],
+        }
+    ).lazy()
+
+
+def test_normalize_trades_casts_price_to_float32_and_date_to_int32():
+    df = normalize_trades(make_raw_trades()).collect()
+
+    assert df.schema["price"] == pl.Float32
+    assert df.schema["date"] == pl.Int32
+
+
+def test_normalize_trades_derives_date_from_timestamp():
+    df = normalize_trades(make_raw_trades()).collect()
+
+    assert df["date"].to_list() == [20260501, 20260501, 20260504]
+
+
+def test_normalize_trades_sorts_by_timestamp():
+    df = normalize_trades(make_raw_trades()).collect()
+
+    timestamps = df["timestamp"].to_list()
+    assert timestamps == sorted(timestamps)
+
+
+def test_normalize_trades_emits_canonical_column_order():
+    df = normalize_trades(make_raw_trades()).collect()
+
+    assert df.columns == [
+        "date",
+        "timestamp",
+        "symbol",
+        "exchange",
+        "price",
+        "size",
+        "conditions",
+        "trade_id",
+        "tape",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("utc_timestamp", "expected_date"),
+    [
+        ("2026-01-15T14:30:00Z", 20260115),  # 09:30 ET — regular session
+        ("2026-01-16T00:30:00Z", 20260115),  # 19:30 ET prior day (EST after-hours)
+        ("2026-02-01T00:30:00Z", 20260131),  # last-of-month EST after-hours -> Jan 31
+    ],
+    ids=["regular_session", "after_hours_crosses_utc_midnight", "after_hours_month_boundary"],
+)
+def test_normalize_trades_date_uses_eastern_session(utc_timestamp, expected_date):
+    lf = pl.DataFrame(
+        {
+            "timestamp": pl.Series([utc_timestamp]).str.to_datetime(
+                time_unit="ns", time_zone="UTC"
+            ),
+            "symbol": ["SPY"],
+            "exchange": ["V"],
+            "price": pl.Series([500.0], dtype=pl.Float64),
+            "size": pl.Series([100], dtype=pl.Int64),
+            "conditions": [["@"]],
+            "trade_id": pl.Series([1], dtype=pl.Int64),
+            "tape": ["B"],
+        }
+    ).lazy()
+
+    df = normalize_trades(lf).collect()
+
+    assert df["date"].to_list() == [expected_date]
 
 
 def make_raw_ohlcv() -> pl.LazyFrame:

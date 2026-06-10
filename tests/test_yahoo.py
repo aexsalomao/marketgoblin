@@ -227,7 +227,7 @@ def test_retry_on_transient_error(source):
 
     with (
         patch("marketgoblin.sources.yahoo.yf.Ticker", side_effect=flaky),
-        patch("marketgoblin.sources.yahoo.time.sleep"),  # don't actually sleep
+        patch("marketgoblin.sources.base.time.sleep"),  # don't actually sleep
     ):
         df = source.fetch(Dataset.OHLCV, "AAPL", "2024-01-01", "2024-01-31").collect()
     assert len(df) == 4

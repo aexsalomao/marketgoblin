@@ -198,6 +198,54 @@ def normalize_statements(lf: pl.LazyFrame) -> pl.LazyFrame:
     return lf.with_columns(casts)
 
 
+# Trades (tick) on-disk schema. Unlike the daily datasets, the canonical time
+# axis is the nanosecond ``timestamp``; the int32 ``date`` is *derived* from it
+# so the monthly slice / merge / load machinery (which partitions by YYYY-MM and
+# filters on ``date``) works unchanged for intraday data.
+_TRADES_COLUMNS: tuple[str, ...] = (
+    "date",
+    "timestamp",
+    "symbol",
+    "exchange",
+    "price",
+    "size",
+    "conditions",
+    "trade_id",
+    "tape",
+)
+
+# US equities trading calendar. The derived `date` is the Eastern session date,
+# NOT the UTC date: extended hours run to 20:00 ET, which crosses UTC midnight
+# (00:00–01:00 UTC), so a UTC date would misstamp after-hours prints and route
+# end-of-month sessions into the next month's slice.
+_SESSION_TZ = "America/New_York"
+
+
+def normalize_trades(lf: pl.LazyFrame) -> pl.LazyFrame:
+    """Cast a trades frame to the on-disk schema and derive int32 YYYYMMDD date.
+
+    Input must carry a tz-aware ``timestamp`` (Datetime). The derived ``date`` is
+    the US/Eastern trading-session date (``_SESSION_TZ``): the timestamp is
+    converted to Eastern before truncation so extended-hours prints that cross
+    UTC midnight still land on the correct session and monthly slice. The stored
+    ``timestamp`` itself stays UTC.
+    """
+    return (
+        lf.with_columns(
+            pl.col("price").cast(pl.Float32),
+            pl.col("size").cast(pl.Int64),
+            pl.col("trade_id").cast(pl.Int64),
+            pl.col("timestamp")
+            .dt.convert_time_zone(_SESSION_TZ)
+            .dt.strftime("%Y%m%d")
+            .cast(pl.Int32)
+            .alias("date"),
+        )
+        .select(_TRADES_COLUMNS)
+        .sort("timestamp")
+    )
+
+
 def parse_dates(lf: pl.LazyFrame) -> pl.LazyFrame:
     """Convert int32 YYYYMMDD date back to pl.Date for in-memory use."""
     return lf.with_columns(pl.col("date").cast(pl.String).str.to_date("%Y%m%d"))

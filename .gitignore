@@ -23,6 +23,7 @@ credentials.json
 
 # Market data — downloaded data can be large and is reproducible
 data/
+.mg-cache/
 
 # Claude local settings (personal preferences, not shared)
 CLAUDE.local.md

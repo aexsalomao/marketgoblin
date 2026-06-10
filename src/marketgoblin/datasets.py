@@ -13,3 +13,4 @@ class Dataset(StrEnum):
     SPLITS = "splits"
     FUNDAMENTALS_DAILY = "fundamentals_daily"
     FUNDAMENTALS_STATEMENTS = "fundamentals_statements"
+    TRADES = "trades"

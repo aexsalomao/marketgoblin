@@ -11,8 +11,68 @@ from marketgoblin._metadata import (
     build_ohlcv,
     build_shares,
     build_splits,
+    build_trades,
     write,
 )
+
+
+def make_trades_chunk() -> pl.DataFrame:
+    # Three trades across two trading days in May 2026.
+    return pl.DataFrame(
+        {
+            "date": pl.Series([20260501, 20260501, 20260504], dtype=pl.Int32),
+            "timestamp": pl.Series(
+                [
+                    "2026-05-01T13:30:00Z",
+                    "2026-05-01T13:30:01Z",
+                    "2026-05-04T14:00:00Z",
+                ]
+            ).str.to_datetime(time_unit="ns", time_zone="UTC"),
+            "symbol": ["SPY"] * 3,
+            "exchange": ["V", "V", "D"],
+            "price": pl.Series([500.1, 500.2, 501.0], dtype=pl.Float32),
+            "size": pl.Series([100, 50, 200], dtype=pl.Int64),
+            "conditions": [["@"], ["@", "I"], ["@"]],
+            "trade_id": pl.Series([1, 2, 3], dtype=pl.Int64),
+            "tape": ["B", "B", "B"],
+        }
+    )
+
+
+def test_build_trades_counts_rows_and_unique_days():
+    meta = build_trades(make_trades_chunk(), "alpaca", "SPY", "2026-05", 4096)
+
+    assert meta["row_count"] == 3
+    assert meta["unique_days"] == 2
+
+
+def test_build_trades_sums_total_volume():
+    meta = build_trades(make_trades_chunk(), "alpaca", "SPY", "2026-05", 4096)
+
+    assert meta["volume_total"] == 350
+
+
+def test_build_trades_records_price_bounds():
+    meta = build_trades(make_trades_chunk(), "alpaca", "SPY", "2026-05", 4096)
+
+    assert meta["price_min"] == pytest.approx(500.1, rel=1e-4)
+    assert meta["price_max"] == pytest.approx(501.0, rel=1e-4)
+
+
+def test_build_trades_omits_missing_day_analysis():
+    meta = build_trades(make_trades_chunk(), "alpaca", "SPY", "2026-05", 4096)
+
+    assert "missing_days" not in meta
+    assert "expected_trading_days" not in meta
+
+
+def test_build_trades_captures_timestamp_span_and_date_bounds():
+    meta = build_trades(make_trades_chunk(), "alpaca", "SPY", "2026-05", 4096)
+
+    assert meta["start_date"] == 20260501
+    assert meta["end_date"] == 20260504
+    assert meta["first_trade_at"] == "2026-05-01 13:30:00+00:00"
+    assert meta["last_trade_at"] == "2026-05-04 14:00:00+00:00"
 
 
 def make_ohlcv_chunk() -> pl.DataFrame:

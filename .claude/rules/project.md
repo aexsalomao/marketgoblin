@@ -37,8 +37,8 @@ src/marketgoblin/
     _bootstrap.py         # side-effect import: load_dotenv() so TIINGO_API_KEY etc. resolve from .env (imported first by __init__)
     datasets.py           # Dataset StrEnum (OHLCV, SHARES, DIVIDENDS, SPLITS, FUNDAMENTALS_DAILY, FUNDAMENTALS_STATEMENTS)
     goblin.py             # MarketGoblin — public API facade
-    _normalize.py         # normalize_ohlcv, normalize_shares, normalize_dividends, normalize_splits, normalize_fundamentals_daily, normalize_statements, parse_dates — pure
-    _metadata.py          # build_ohlcv, build_shares, build_dividends, build_splits, build_fundamentals_daily, build_fundamentals_statements, write — pure
+    _normalize.py         # normalize_ohlcv, normalize_shares, normalize_dividends, normalize_splits, normalize_fundamentals_daily, normalize_statements, normalize_trades, parse_dates — pure
+    _metadata.py          # build_ohlcv, build_shares, build_dividends, build_splits, build_fundamentals_daily, build_fundamentals_statements, build_trades, write — pure
     _serialization.py     # JSONSerializable — to_dict / from_dict mixin for the persisted dataclasses
     ticker_metadata.py    # TickerMetadata dataclass — unified, source-agnostic ticker profile
     classification.py     # SectorProfile / IndustryProfile / Classification dataclasses
@@ -56,6 +56,8 @@ src/marketgoblin/
             prices.py     # OHLCV / dividends / splits from the prices payload
             fundamentals.py  # daily valuation, quarterly statements, derived shares
             metadata.py   # TickerMetadata + Classification adapters; /fundamentals/meta REST call
+        alpaca.py         # AlpacaSource — intraday TRADES (tick) via Alpaca Data API v2 REST
+        _alpaca_parsing.py # Pure helper behind AlpacaSource (trades payload → tidy frame)
     storage/
         disk.py           # DiskStorage — dataset-aware monthly .pq slices + metadata/classification JSON
 scripts/
@@ -75,6 +77,9 @@ tests/
     test_tiingo_prices.py     # prices/dividends/splits parser unit tests
     test_tiingo_fundamentals.py  # daily/statements/derived-shares parser unit tests
     test_tiingo_metadata.py   # metadata/classification/slugify parser unit tests
+    _alpaca_data.py           # shared Alpaca JSON-shape builders (imported by test_alpaca*)
+    test_alpaca.py            # AlpacaSource orchestration tests (requests/session mocked)
+    test_alpaca_parsing.py    # trades-payload parser unit tests
 docs/                     # MkDocs source (index.md, api.md, providers.md, contributing.md, changelog.md)
 notebooks/                # marketgoblin_walkthrough.ipynb
 example.py
@@ -93,6 +98,7 @@ class Dataset(StrEnum):
     SPLITS = "splits"
     FUNDAMENTALS_DAILY = "fundamentals_daily"
     FUNDAMENTALS_STATEMENTS = "fundamentals_statements"
+    TRADES = "trades"
 ```
 
 `StrEnum` so members serialize directly to path segments and JSON. Public API
@@ -101,7 +107,7 @@ class Dataset(StrEnum):
 ### `goblin.py` — `MarketGoblin`
 
 ```python
-_SOURCES: dict[str, type[BaseSource]] = {"yahoo": YahooSource, "tiingo": TiingoSource}
+_SOURCES: dict[str, type[BaseSource]] = {"yahoo": YahooSource, "tiingo": TiingoSource, "alpaca": AlpacaSource}
 _DATE_FMT = "%Y-%m-%d"
 
 _validate_dates(start, end)              # bad format or start >= end → ValueError
@@ -142,6 +148,7 @@ def normalize_dividends(lf) -> pl.LazyFrame   # → float32 dividend, int32 YYYY
 def normalize_splits(lf)    -> pl.LazyFrame   # → float32 split_factor, int32 YYYYMMDD date
 def normalize_fundamentals_daily(lf) -> pl.LazyFrame  # → int64 market_cap/enterprise_val, float32 ratios, int32 YYYYMMDD date
 def normalize_statements(lf) -> pl.LazyFrame  # → int16 fiscal_year, int8 fiscal_quarter, int32 YYYYMMDD date, + every STATEMENT_FIELDS line item × {as_reported, adjusted} (float64 for $/share-counts, float32 for per-share/ratios). STATEMENT_FIELDS is the single source of truth for the statements on-disk schema.
+def normalize_trades(lf)    -> pl.LazyFrame   # → float32 price, int64 size/trade_id, ns-UTC timestamp, derived int32 YYYYMMDD date; canonical column order, sorted by timestamp
 def parse_dates(lf)         -> pl.LazyFrame   # → int32 YYYYMMDD → pl.Date
 ```
 
@@ -156,6 +163,7 @@ def build_dividends(chunk, provider, symbol, ym, file_size_bytes, currency="USD"
 def build_splits(chunk, provider, symbol, ym, file_size_bytes) -> dict
 def build_fundamentals_daily(chunk, provider, symbol, ym, file_size_bytes) -> dict
 def build_fundamentals_statements(chunk, provider, symbol, ym, file_size_bytes) -> dict
+def build_trades(chunk, provider, symbol, ym, file_size_bytes, currency="USD") -> dict
 def write(metadata, path) -> None  # atomic via .tmp rename
 ```
 
@@ -165,6 +173,7 @@ def write(metadata, path) -> None  # atomic via .tmp rename
 `build_splits()` computes row_count, date range, split_factor min/max — no missing-days analysis (splits are event-driven and rare).
 `build_fundamentals_daily()` computes row_count, date range, market_cap min/max, pe_ratio min/max — no missing-days analysis (Tiingo's daily fundamentals occasionally drop bars around corporate actions, not worth alarming on).
 `build_fundamentals_statements()` computes row_count, date range, fiscal_year min/max, and as-reported eps_diluted / revenue / net_income min/max — quarterly cadence so the slice typically holds one row.
+`build_trades()` computes row_count, unique_days, date range, nanosecond timestamp span (first/last trade), price min/max, and `volume_total` (sum of per-trade size) — intraday/event-dense, so no missing-days analysis; on a partial feed (IEX) `volume_total` is a fraction of consolidated volume by design.
 All take `file_size_bytes: int` (caller reads `path.stat().st_size` after the atomic write).
 
 ### `sources/base.py` — `BaseSource`
@@ -244,6 +253,23 @@ concrete submodule.
 - `fundamentals.py` — `fundamentals_daily_rows_to_lf`, `statements_rows_to_lf`, `derive_shares_from_marketcap`, plus the `_TIINGO_STATEMENT_CODES` dataCode→column map and the two import-time guards (drift vs. `_normalize.STATEMENT_FIELDS`, and duplicate-code detection) that fail loud at import if the map and on-disk schema diverge.
 - `metadata.py` — `fetch_latest_close`, `fetch_latest_fundamentals`, `build_tiingo_metadata`, `fetch_fundamentals_meta`, `build_tiingo_classification`. The only submodule importing `requests` (the `/fundamentals/meta` REST call); patch `_tiingo_parsing.metadata.requests` in tests.
 
+### `sources/alpaca.py` — `AlpacaSource`
+
+```python
+class AlpacaSource(BaseSource):
+    name = "alpaca"
+    def __init__(self, api_key=None, api_secret=None, feed="iex", **kwargs)
+    def _fetch_trades(self, symbol, start, end) -> pl.LazyFrame
+    def _download_trades(self, symbol, start, end) -> list[dict]   # paginates next_page_token
+    def _retry_fetch(self, fetch_fn, symbol) -> _T
+```
+
+- Supports a single dataset: `Dataset.TRADES` — intraday tick-by-tick executions.
+- TRADES: paginated `GET data.alpaca.markets/v2/stocks/{SYMBOL}/trades` (follows `next_page_token`); rows projected by `trades_rows_to_lf` then `normalize_trades`.
+- Credentials resolve from `api_key`/`api_secret` args or `ALPACA_API_KEY`/`ALPACA_API_SECRET`. The cred check runs in `_fetch_trades` *before* the retry loop (a missing key is not transient). The free Basic plan serves `feed="iex"` (real ticks, IEX-only ≈ a few % of consolidated volume); `feed="sip"` needs a paid plan.
+- Symbol is upper-cased in the request URL and the on-disk `symbol` column.
+- `_retry_fetch` mirrors Tiingo's: retries transient errors with 1 s / 2 s backoff; `ValueError` (empty data) propagates immediately.
+
 ### `storage/disk.py` — `DiskStorage`
 
 ```python
@@ -266,7 +292,7 @@ class DiskStorage:
 ```
 
 Path scheme is uniform across datasets: `{base_path}/{provider}/{dataset}/{SYMBOL}/{SYMBOL}_{YYYY-MM}.pq`. OHLCV no longer has an adjusted/raw variant segment — both variants live in the same parquet files, distinguished by the `is_adjusted` column.
-`_build_metadata` dispatches per `Dataset` to the matching `build_*` in `_metadata.py` (ohlcv / shares / dividends / splits / fundamentals_daily / fundamentals_statements). Missing-days warnings only emitted for OHLCV.
+`_build_metadata` dispatches per `Dataset` to the matching `build_*` in `_metadata.py` (ohlcv / shares / dividends / splits / fundamentals_daily / fundamentals_statements / trades). Missing-days warnings only emitted for OHLCV. TRADES slices fit the same monthly-`.pq` machinery because `normalize_trades` derives an int32 `date` from each trade's `timestamp` — slicing and the load-range filter key on `date` exactly as the daily datasets do, while the full nanosecond `timestamp` is preserved as the real time axis. Merging is the exception: `_merge_existing` dedups TRADES on full per-trade identity (every column except the list-typed `conditions`), not the `date` key the daily datasets use, so a partial-day re-fetch unions rather than evicting the day.
 `TickerMetadata` and `Classification` are persisted as standalone JSON (not monthly slices) under `{provider}/metadata/` and `{provider}/classification/`, atomically via `.tmp` rename; the load methods raise `FileNotFoundError` when absent.
 
 ### `ticker_metadata.py` — `TickerMetadata`
@@ -322,6 +348,7 @@ Imported first by `__init__.py`; existing shell exports take precedence.
 
 - **Date on disk:** `int32` YYYYMMDD (e.g. `20240101`); use `parse_dates=True` to get `pl.Date`
 - **OHLC:** `float32` | **Volume:** `int64` | **is_adjusted:** `bool` | **Shares:** `int64` (large-cap counts overflow int32) | **Dividend:** `float32`
+- **Trades (tick):** intraday dataset — `timestamp` is `Datetime("ns", "UTC")` (the real axis), `price` `float32`, `size`/`trade_id` `int64`, `conditions` `list[str]`; the int32 `date` is *derived* from the **US/Eastern session date** of `timestamp` (so extended-hours prints that cross UTC midnight land on the right session) and lets the daily monthly-slice machinery apply unchanged
 - **Parquet paths:** `{base_path}/{provider}/{dataset}/{SYMBOL}/{SYMBOL}_{YYYY-MM}.pq` — one layout for every dataset
 - **JSON sidecar:** same path, `.json` extension — written atomically after each `.pq`
 - **Atomic writes:** `.tmp` rename for both `.pq` and `.json`
@@ -344,6 +371,10 @@ goblin.py
   │                                 ──→ sources.base.BaseSource, Fetcher
   │                                 ──→ sources._tiingo_parsing (prices_rows_to_stacked_ohlcv, build_tiingo_metadata, ...)
   │                                 ──→ classification, ticker_metadata, datasets.Dataset
+  ├── sources.alpaca.AlpacaSource   ──→ _normalize.normalize_trades
+  │                                 ──→ sources.base.BaseSource, Fetcher
+  │                                 ──→ sources._alpaca_parsing (trades_rows_to_lf)
+  │                                 ──→ datasets.Dataset
   └── storage.disk.DiskStorage      ──→ _metadata.build_* + write
                                     ──→ _normalize.parse_dates
                                     ──→ classification, ticker_metadata, datasets.Dataset
@@ -354,6 +385,8 @@ sources/_tiingo_parsing/
   prices.py      ──→ _tiingo_parsing.common
   fundamentals.py──→ _tiingo_parsing.common, _normalize (STATEMENT_FIELDS, STATEMENT_VARIANTS)
   metadata.py    ──→ _tiingo_parsing.common, classification, ticker_metadata
+
+sources/_alpaca_parsing.py ──→ (polars only — no local imports)
 
 sector_indices.py        ──→ _sector_indices_parser
 _sector_indices_parser.py──→ _serialization

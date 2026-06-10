@@ -392,7 +392,7 @@ def test_retry_on_transient_error(source):
 
     with (
         patch.object(source._client, "get_ticker_price", side_effect=flaky),
-        patch("marketgoblin.sources.tiingo.time.sleep"),
+        patch("marketgoblin.sources.base.time.sleep"),
     ):
         df = source.fetch(Dataset.OHLCV, "AAPL", "2024-01-01", "2024-01-31").collect()
     assert df.height == 4
@@ -428,7 +428,7 @@ def test_retry_on_transient_error_in_shares_path(source):
     with (
         patch.object(source._client, "get_ticker_price", return_value=make_prices_rows()),
         patch.object(source._client, "get_fundamentals_daily", side_effect=flaky_fundamentals),
-        patch("marketgoblin.sources.tiingo.time.sleep"),
+        patch("marketgoblin.sources.base.time.sleep"),
     ):
         df = source.fetch(Dataset.SHARES, "AAPL", "2024-01-01", "2024-01-31").collect()
     assert df.height == 2
@@ -448,7 +448,7 @@ def test_retry_on_transient_error_in_classification_path(source):
 
     with (
         patch("marketgoblin.sources.tiingo.fetch_fundamentals_meta", side_effect=flaky_meta),
-        patch("marketgoblin.sources.tiingo.time.sleep"),
+        patch("marketgoblin.sources.base.time.sleep"),
     ):
         classification = source.fetch_classification("AAPL")
     assert classification.sector is not None
@@ -470,7 +470,7 @@ def test_http_error_propagates_after_retries(source):
             "get_ticker_price",
             side_effect=requests.HTTPError("upstream down"),
         ),
-        patch("marketgoblin.sources.tiingo.time.sleep"),
+        patch("marketgoblin.sources.base.time.sleep"),
         pytest.raises(requests.HTTPError),
     ):
         source.fetch(Dataset.OHLCV, "AAPL", "2024-01-01", "2024-01-31")
