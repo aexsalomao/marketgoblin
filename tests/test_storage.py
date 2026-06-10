@@ -243,6 +243,52 @@ def test_save_lowercase_symbol_loadable_as_uppercase(storage, tmp_path):
     assert (tmp_path / "yahoo" / "ohlcv" / "AAPL").exists()
 
 
+def make_ohlcv_partial_lf() -> pl.LazyFrame:
+    # A later partial-month fetch: one PRE-EXISTING Jan date (restated close) + one NEW date.
+    dates = [20240103, 20240104]
+    return pl.DataFrame(
+        {
+            "date": pl.Series(dates * 2, dtype=pl.Int32),
+            "open": pl.Series([186.5, 189.0] * 2, dtype=pl.Float32),
+            "high": pl.Series([188.5, 191.0] * 2, dtype=pl.Float32),
+            "low": pl.Series([184.5, 187.0] * 2, dtype=pl.Float32),
+            "close": pl.Series([999.0, 190.0] * 2, dtype=pl.Float32),
+            "volume": pl.Series([60_000_000, 55_000_000] * 2, dtype=pl.Int64),
+            "symbol": ["AAPL"] * 4,
+            "is_adjusted": [True] * 2 + [False] * 2,
+        }
+    ).lazy()
+
+
+def test_save_partial_month_merges_with_existing_slice(storage):
+    # Regression: a fetch covering only part of a month must NOT erase the rest of the
+    # slice (the paper-trading daily loop fetches a ~7-day tail every evening).
+    storage.save("yahoo", "AAPL", Dataset.OHLCV, make_ohlcv_lf())
+    storage.save("yahoo", "AAPL", Dataset.OHLCV, make_ohlcv_partial_lf())
+    df = storage.load("yahoo", "AAPL", Dataset.OHLCV, "2024-01-01", "2024-01-31").collect()
+    # 0102 kept from the first save, 0103 restated, 0104 added — each in 2 variants
+    assert sorted(set(df["date"].to_list())) == [20240102, 20240103, 20240104]
+    assert len(df) == 6
+
+
+def test_save_overlapping_dates_take_new_rows(storage):
+    storage.save("yahoo", "AAPL", Dataset.OHLCV, make_ohlcv_lf())
+    storage.save("yahoo", "AAPL", Dataset.OHLCV, make_ohlcv_partial_lf())
+    df = storage.load("yahoo", "AAPL", Dataset.OHLCV, "2024-01-01", "2024-01-31").collect()
+    restated = df.filter((pl.col("date") == 20240103) & pl.col("is_adjusted"))
+    assert len(restated) == 1  # no duplicate variant rows for the overlapping date
+    assert restated["close"][0] == 999.0  # the restatement won
+    untouched = df.filter((pl.col("date") == 20240102) & pl.col("is_adjusted"))
+    assert untouched["close"][0] == 186.0  # the uncovered date survived verbatim
+
+
+def test_save_partial_month_leaves_other_months_alone(storage):
+    storage.save("yahoo", "AAPL", Dataset.OHLCV, make_ohlcv_lf())
+    storage.save("yahoo", "AAPL", Dataset.OHLCV, make_ohlcv_partial_lf())
+    feb = storage.load("yahoo", "AAPL", Dataset.OHLCV, "2024-02-01", "2024-02-29").collect()
+    assert set(feb["date"].to_list()) == {20240201, 20240202}
+
+
 def test_save_splits_creates_pq_files(storage, tmp_path):
     storage.save("tiingo", "AAPL", Dataset.SPLITS, make_splits_lf())
     assert (tmp_path / "tiingo" / "splits" / "AAPL" / "AAPL_2020-08.pq").exists()

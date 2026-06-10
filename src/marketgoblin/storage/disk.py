@@ -48,7 +48,14 @@ class DiskStorage:
         dataset: Dataset,
         lf: pl.LazyFrame,
     ) -> None:
-        """Split by month and atomically write one .pq file per month."""
+        """Split by month and atomically write one .pq file per month.
+
+        Each month slice is MERGED with any rows already on disk: existing rows
+        whose date is not covered by the incoming frame are kept, and incoming
+        rows win on overlapping dates (vendor restatements replace stale bars).
+        A partial-range fetch therefore never erases the rest of a month — only
+        deleting the slice file discards history.
+        """
         # Normalize symbol case at the boundary so save() and load() always agree
         # regardless of how the caller spelled the ticker.
         symbol = symbol.upper()
@@ -64,6 +71,7 @@ class DiskStorage:
             chunk = df.filter(pl.col("_ym") == ym).drop("_ym").sort("date")
             path = self._slice_path(provider, symbol, dataset, ym)
             path.parent.mkdir(parents=True, exist_ok=True)
+            chunk = self._merge_existing(chunk, path)
             self._atomic_write(chunk, path)
             meta = self._build_metadata(chunk, provider, symbol, dataset, ym, path.stat().st_size)
             _write_metadata(meta, path.with_suffix(".json"))
@@ -171,6 +179,25 @@ class DiskStorage:
                 chunk, provider, symbol, ym, file_size_bytes
             )
         return _build_shares_metadata(chunk, provider, symbol, ym, file_size_bytes)
+
+    def _merge_existing(self, chunk: pl.DataFrame, path: Path) -> pl.DataFrame:
+        """Union an incoming month chunk with the slice already at ``path``, new dates winning.
+
+        Keeps existing rows for dates the incoming frame does not cover (a partial-range
+        fetch must not erase the rest of the month) and takes the incoming rows wherever
+        dates overlap. An unreadable existing slice falls back to plain replacement.
+        """
+        if not path.exists():
+            return chunk
+        try:
+            existing = pl.read_parquet(path)
+        except Exception:  # noqa: BLE001 - corrupt slice -> rewrite it from the fresh fetch
+            logger.warning("unreadable slice %s; replacing with fetched rows", path.name)
+            return chunk
+        kept = existing.filter(~pl.col("date").is_in(chunk["date"].implode()))
+        if kept.is_empty():
+            return chunk
+        return pl.concat([kept, chunk], how="vertical_relaxed").sort("date")
 
     def _atomic_write(self, df: pl.DataFrame, path: Path) -> None:
         tmp = path.with_suffix(".tmp")
